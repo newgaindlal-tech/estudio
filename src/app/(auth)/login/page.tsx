@@ -8,7 +8,6 @@ import { GraduationCap, ArrowRight, Loader2, AlertCircle } from 'lucide-react';
 
 export default function LoginPage() {
   const router = useRouter();
-  const supabase = createClient();
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -20,28 +19,37 @@ export default function LoginPage() {
     setErrorMsg(null);
     setLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    try {
+      // Lazy-initialize client inside handler to avoid build-time prerender issues
+      const supabase = createClient();
+      const { error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (error) {
-      setErrorMsg(error.message);
+      if (error) {
+        setErrorMsg(error.message);
+        setLoading(false);
+      } else {
+        router.push('/');
+        router.refresh();
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'An unexpected error occurred');
       setLoading(false);
-    } else {
-      router.push('/');
-      router.refresh();
     }
   };
 
   return (
     <>
       <head>
-        <title>Sign In | Estudio College Life Hub</title>
+        <title>Sign In | Estudio - Student Workspace</title>
         <meta
           name="description"
-          content="Sign in to access your college timetable, attendance manager, and scientific workstation."
+          content="Sign in to access your college timetable, attendance manager, and student workspace."
         />
+        <link rel="canonical" href="https://estudioworkspace.vercel.app/login" />
+        <meta name="robots" content="index, follow" />
       </head>
 
       <div className="min-h-[100dvh] bg-slate-950 flex flex-col justify-center py-6 sm:py-12 px-4 sm:px-6 lg:px-8">
