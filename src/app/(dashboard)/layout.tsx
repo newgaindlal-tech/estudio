@@ -101,9 +101,9 @@ export default function DashboardLayout({
       {/* ========================================================================= */}
       {/* MAIN CONTENT REGION                                                       */}
       {/* ========================================================================= */}
-      <main className="flex-1 md:ml-64 p-4 sm:p-6 lg:p-8 pb-24 md:pb-8 max-w-7xl mx-auto w-full">
-        {children}
-      </main>
+      <main className="flex-1 overflow-y-auto pb-24 md:pb-6 px-4 sm:px-6 lg:px-8">
+  {children}
+</main>
 
       {/* ========================================================================= */}
       {/* MOBILE BOTTOM DOCK (Sticky on phones, hidden on desktop)                  */}

@@ -8,14 +8,11 @@ import {
   Plus,
   Trash2,
   Calendar,
-  BookOpen,
   MapPin,
   CheckCircle2,
   XCircle,
   Slash,
   Loader2,
-  Sparkles,
-  ArrowRight,
   Sun,
   User,
 } from 'lucide-react';
@@ -31,7 +28,7 @@ const DAYS: { key: DayOfWeek; label: string; short: string }[] = [
 ];
 
 function getTodayDayOfWeek(): DayOfWeek {
-  const dayIdx = new Date().getDay(); // 0 = Sunday, 1 = Monday ... 6 = Saturday
+  const dayIdx = new Date().getDay();
   const mapping: Record<number, DayOfWeek> = {
     0: 'SUNDAY',
     1: 'MONDAY',
@@ -66,7 +63,6 @@ export default function TimetablePage() {
 
   const todayDateStr = new Date().toISOString().split('T')[0];
 
-  // Fetch all timetable slots & subjects
   const fetchData = useCallback(async () => {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
@@ -94,14 +90,12 @@ export default function TimetablePage() {
     fetchData();
   }, [fetchData]);
 
-  // Filter slots for the currently selected day tab
   const daySlots = useMemo(() => {
     return slots
       .filter((s) => s.day_of_week === selectedDay)
       .sort((a, b) => a.start_time.localeCompare(b.start_time));
   }, [slots, selectedDay]);
 
-  // Quick Attendance Marking directly from Timetable (if selectedDay is today)
   const handleMarkAttendance = async (subjectId: string, status: AttendanceStatus) => {
     setActionLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
@@ -132,7 +126,6 @@ export default function TimetablePage() {
     setActionLoading(false);
   };
 
-  // Add new timetable slot
   const handleAddSlot = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedSubjectId) return;
@@ -157,7 +150,6 @@ export default function TimetablePage() {
     setActionLoading(false);
   };
 
-  // Delete slot
   const handleDeleteSlot = async (slotId: string) => {
     setActionLoading(true);
     await supabase.from('timetable_slots').delete().eq('id', slotId);
@@ -183,15 +175,15 @@ export default function TimetablePage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div className="max-w-4xl mx-auto space-y-5 pb-28 md:pb-10 px-1 sm:px-0">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-800 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-800/80 pb-4">
         <div>
-          <h2 className="text-2xl font-bold text-white flex items-center gap-2.5">
-            <Clock className="w-7 h-7 text-amber-500" />
+          <h2 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2">
+            <Clock className="w-6 h-6 text-amber-500 flex-shrink-0" />
             Weekly Timetable & Routine
           </h2>
-          <p className="text-slate-400 text-xs mt-0.5">
+          <p className="text-slate-400 text-xs mt-1">
             Auto-detects today&apos;s schedule with 7-day routine isolation and instant attendance tagging.
           </p>
         </div>
@@ -204,16 +196,16 @@ export default function TimetablePage() {
             }
             setShowAddModal(true);
           }}
-          className="bg-amber-600 hover:bg-amber-500 text-white px-3.5 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition self-start sm:self-auto shadow-lg shadow-amber-900/20"
+          className="bg-amber-600 hover:bg-amber-500 text-white px-3.5 py-2.5 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition w-full sm:w-auto shadow-lg shadow-amber-900/20"
         >
           <Plus className="w-4 h-4" />
-          Add Class to {DAYS.find((d) => d.key === selectedDay)?.label}
+          Add Class to {DAYS.find((d) => d.key === selectedDay)?.short}
         </button>
       </div>
 
-      {/* 7-DAY NAVIGATION SELECTOR (MONDAY TO SUNDAY) */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-2 shadow-xl">
-        <div className="grid grid-cols-7 gap-1">
+      {/* 7-DAY HORIZONTAL SCROLL NAVIGATOR (Zero squeeze on mobile) */}
+      <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-1.5 sm:p-2 shadow-xl">
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
           {DAYS.map((day) => {
             const isToday = day.key === todayDay;
             const isSelected = day.key === selectedDay;
@@ -223,7 +215,7 @@ export default function TimetablePage() {
               <button
                 key={day.key}
                 onClick={() => setSelectedDay(day.key)}
-                className={`py-3 px-1 rounded-xl flex flex-col items-center justify-center transition relative ${
+                className={`flex-shrink-0 min-w-[4.8rem] sm:min-w-0 sm:flex-1 py-2.5 px-2 rounded-xl flex flex-col items-center justify-center transition relative ${
                   isSelected
                     ? 'bg-amber-500 text-slate-950 font-bold shadow-md shadow-amber-500/20'
                     : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
@@ -240,9 +232,9 @@ export default function TimetablePage() {
                 )}
                 <span className="text-xs uppercase tracking-wider">{day.short}</span>
                 <span
-                  className={`text-[10px] mt-0.5 px-1.5 py-0.2 rounded-full ${
+                  className={`text-[10px] mt-0.5 px-1.5 py-0.2 rounded-full whitespace-nowrap ${
                     isSelected
-                      ? 'bg-slate-900 text-amber-300 font-mono'
+                      ? 'bg-slate-900/80 text-amber-300 font-mono font-medium'
                       : count > 0
                       ? 'bg-slate-800 text-slate-300'
                       : 'text-slate-600'
@@ -257,29 +249,31 @@ export default function TimetablePage() {
       </div>
 
       {/* DAY BANNER & STATUS */}
-      <div className="flex items-center justify-between px-2">
+      <div className="flex items-center justify-between px-1">
         <div className="flex items-center gap-2">
           <Calendar className="w-4 h-4 text-amber-400" />
-          <h3 className="text-base font-bold text-white">
+          <h3 className="text-sm sm:text-base font-bold text-white">
             {DAYS.find((d) => d.key === selectedDay)?.label}&apos;s Schedule
           </h3>
           {selectedDay === todayDay && (
             <span className="bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] px-2 py-0.5 rounded-full font-semibold flex items-center gap-1">
-              <Sun className="w-3 h-3 text-emerald-400" /> Today Active
+              <Sun className="w-3 h-3 text-emerald-400" /> Active
             </span>
           )}
         </div>
 
-        <span className="text-xs text-slate-400">
-          {daySlots.length} {daySlots.length === 1 ? 'Period' : 'Periods'} scheduled
+        <span className="text-[11px] sm:text-xs text-slate-400">
+          {daySlots.length} {daySlots.length === 1 ? 'Period' : 'Periods'}
         </span>
       </div>
 
       {/* TIMELINE LIST FOR SELECTED DAY */}
       {daySlots.length === 0 ? (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-12 text-center space-y-3">
+        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 sm:p-12 text-center space-y-3">
           <Clock className="w-10 h-10 text-slate-600 mx-auto" />
-          <h3 className="text-white font-bold text-base">No classes scheduled for {DAYS.find((d) => d.key === selectedDay)?.label}</h3>
+          <h3 className="text-white font-bold text-sm sm:text-base">
+            No classes scheduled for {DAYS.find((d) => d.key === selectedDay)?.label}
+          </h3>
           <p className="text-slate-400 text-xs max-w-sm mx-auto">
             Enjoy your free day or add college lecture slots using the button above.
           </p>
@@ -300,52 +294,64 @@ export default function TimetablePage() {
             return (
               <div
                 key={slot.id}
-                className="bg-slate-900 border border-slate-800 hover:border-slate-700/80 rounded-xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition shadow-sm"
+                className="bg-slate-900 border border-slate-800 hover:border-slate-700/80 rounded-2xl p-3.5 sm:p-5 flex flex-col gap-3.5 transition shadow-sm"
               >
-                {/* Time & Subject Information */}
-                <div className="flex items-start sm:items-center gap-4">
-                  {/* Period Badge */}
-                  <div className="w-10 h-10 rounded-xl bg-amber-950/60 border border-amber-800/60 text-amber-300 font-bold flex items-center justify-center text-sm font-mono flex-shrink-0">
-                    #{index + 1}
-                  </div>
-
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <h4 className="text-white font-bold text-base">{sub?.name || 'Unknown Subject'}</h4>
-                      {sub?.code && (
-                        <span className="text-[11px] font-mono bg-slate-800 text-slate-300 px-2 py-0.5 rounded">
-                          {sub.code}
-                        </span>
-                      )}
+                {/* Top: Period, Subject & Delete */}
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-start gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-xl bg-amber-950/60 border border-amber-800/60 text-amber-300 font-bold flex items-center justify-center text-xs sm:text-sm font-mono flex-shrink-0 mt-0.5">
+                      #{index + 1}
                     </div>
 
-                    <div className="flex flex-wrap items-center gap-3 text-xs text-slate-400">
-                      <span className="flex items-center gap-1 font-mono text-amber-400 font-semibold">
-                        <Clock className="w-3.5 h-3.5" />
-                        {formatTimeDisplay(slot.start_time)} – {formatTimeDisplay(slot.end_time)}
-                      </span>
+                    <div className="min-w-0 space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="text-white font-bold text-sm sm:text-base truncate">
+                          {sub?.name || 'Unknown Subject'}
+                        </h4>
+                        {sub?.code && (
+                          <span className="text-[10px] font-mono bg-slate-800 text-slate-300 px-1.5 py-0.5 rounded flex-shrink-0">
+                            {sub.code}
+                          </span>
+                        )}
+                      </div>
 
-                      {(slot.room_number || sub?.room_number) && (
-                        <span className="flex items-center gap-1">
-                          <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                          {slot.room_number || sub?.room_number}
+                      <div className="flex flex-wrap items-center gap-2.5 text-xs text-slate-400">
+                        <span className="flex items-center gap-1 font-mono text-amber-400 font-medium text-[11px] sm:text-xs">
+                          <Clock className="w-3 h-3 flex-shrink-0" />
+                          {formatTimeDisplay(slot.start_time)} – {formatTimeDisplay(slot.end_time)}
                         </span>
-                      )}
 
-                      {sub?.lecturer_name && (
-                        <span className="flex items-center gap-1 text-slate-400">
-                          <User className="w-3.5 h-3.5" />
-                          {sub.lecturer_name}
-                        </span>
-                      )}
+                        {(slot.room_number || sub?.room_number) && (
+                          <span className="flex items-center gap-1 text-[11px] sm:text-xs">
+                            <MapPin className="w-3 h-3 text-slate-500 flex-shrink-0" />
+                            {slot.room_number || sub?.room_number}
+                          </span>
+                        )}
+
+                        {sub?.lecturer_name && (
+                          <span className="flex items-center gap-1 text-[11px] sm:text-xs">
+                            <User className="w-3 h-3 flex-shrink-0" />
+                            {sub.lecturer_name}
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
+
+                  {/* Remove Slot */}
+                  <button
+                    onClick={() => handleDeleteSlot(slot.id)}
+                    className="p-2 text-slate-500 hover:text-rose-400 bg-slate-950/60 border border-slate-800/80 hover:border-slate-700 rounded-lg transition flex-shrink-0"
+                    title="Remove from Timetable"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
                 </div>
 
-                {/* Right side: Attendance actions (if today) & Delete */}
-                <div className="flex items-center justify-between sm:justify-end gap-3 pt-3 sm:pt-0 border-t sm:border-t-0 border-slate-800">
-                  {/* Today Quick Attendance Marker */}
-                  {selectedDay === todayDay ? (
+                {/* Bottom: Attendance action row */}
+                {selectedDay === todayDay && (
+                  <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-slate-800/60">
+                    <span className="text-[11px] text-slate-400 font-medium">Quick Attendance:</span>
                     <div className="flex items-center gap-1.5">
                       <button
                         disabled={actionLoading}
@@ -355,7 +361,6 @@ export default function TimetablePage() {
                             ? 'bg-emerald-600 text-white border-emerald-500 shadow-md shadow-emerald-900/30'
                             : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
                         }`}
-                        title="Mark Present Today"
                       >
                         <CheckCircle2 className="w-3.5 h-3.5" />
                         Present
@@ -369,7 +374,6 @@ export default function TimetablePage() {
                             ? 'bg-rose-600 text-white border-rose-500 shadow-md shadow-rose-900/30'
                             : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
                         }`}
-                        title="Mark Absent Today"
                       >
                         <XCircle className="w-3.5 h-3.5" />
                         Absent
@@ -378,44 +382,29 @@ export default function TimetablePage() {
                       <button
                         disabled={actionLoading}
                         onClick={() => handleMarkAttendance(slot.subject_id, 'OFF')}
-                        className={`px-2 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1 transition border ${
+                        className={`p-1.5 rounded-lg text-xs font-semibold flex items-center justify-center transition border ${
                           todayRec?.status === 'OFF'
                             ? 'bg-amber-600 text-white border-amber-500 shadow-md shadow-amber-900/30'
                             : 'bg-slate-800 text-slate-300 border-slate-700 hover:bg-slate-700'
                         }`}
                         title="Class Cancelled"
                       >
-                        <Slash className="w-3 h-3" />
+                        <Slash className="w-3.5 h-3.5" />
                       </button>
                     </div>
-                  ) : (
-                    <span className="text-[11px] text-slate-500 italic">
-                      Scheduled for {DAYS.find((d) => d.key === selectedDay)?.short}
-                    </span>
-                  )}
-
-                  {/* Remove Slot */}
-                  <button
-                    onClick={() => handleDeleteSlot(slot.id)}
-                    className="p-2 text-slate-500 hover:text-rose-400 bg-slate-950 border border-slate-800 hover:border-slate-700 rounded-lg transition"
-                    title="Remove from Timetable"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                  </div>
+                )}
               </div>
             );
           })}
         </div>
       )}
 
-      {/* ========================================================================= */}
-      {/* MODAL: ADD TIMETABLE SLOT                                                 */}
-      {/* ========================================================================= */}
+      {/* MODAL: ADD TIMETABLE SLOT (Mobile-Safe with Max Height & Scroll) */}
       {showAddModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
-            <h3 className="text-lg font-bold text-white flex items-center gap-2">
+        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-3.5 backdrop-blur-sm overflow-y-auto">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 max-w-md w-full shadow-2xl space-y-4 my-auto max-h-[90dvh] overflow-y-auto">
+            <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2">
               <Clock className="w-5 h-5 text-amber-500" />
               Add Class to {DAYS.find((d) => d.key === selectedDay)?.label}
             </h3>
@@ -426,7 +415,7 @@ export default function TimetablePage() {
                 <select
                   value={selectedSubjectId}
                   onChange={(e) => setSelectedSubjectId(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none focus:ring-1 focus:ring-amber-500"
                 >
                   {subjects.map((s) => (
                     <option key={s.id} value={s.id}>
@@ -444,7 +433,7 @@ export default function TimetablePage() {
                     required
                     value={startTime}
                     onChange={(e) => setStartTime(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm font-mono"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm font-mono"
                   />
                 </div>
                 <div>
@@ -454,7 +443,7 @@ export default function TimetablePage() {
                     required
                     value={endTime}
                     onChange={(e) => setEndTime(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm font-mono"
+                    className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm font-mono"
                   />
                 </div>
               </div>
@@ -466,22 +455,22 @@ export default function TimetablePage() {
                   placeholder="e.g. LT-3 or Machines Lab"
                   value={slotRoom}
                   onChange={(e) => setSlotRoom(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-white text-sm"
+                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm placeholder-slate-500"
                 />
               </div>
 
-              <div className="flex gap-2 justify-end pt-3 border-t border-slate-800">
+              <div className="flex gap-2.5 justify-end pt-3 border-t border-slate-800">
                 <button
                   type="button"
                   onClick={() => setShowAddModal(false)}
-                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-lg font-semibold"
+                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2.5 rounded-xl font-semibold text-xs"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={actionLoading}
-                  className="bg-amber-600 hover:bg-amber-500 text-white px-5 py-2 rounded-lg font-semibold transition disabled:opacity-50"
+                  className="bg-amber-600 hover:bg-amber-500 text-white px-5 py-2.5 rounded-xl font-semibold text-xs transition disabled:opacity-50"
                 >
                   Save Slot
                 </button>
