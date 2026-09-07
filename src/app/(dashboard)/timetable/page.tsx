@@ -452,7 +452,7 @@ export default function TimetablePage() {
                 <label className="block text-slate-400 font-semibold mb-1">Room / Hall (Optional)</label>
                 <input
                   type="text"
-                  placeholder="e.g. LT-3 or Machines Lab"
+                  placeholder="Enter Room / Hall)"
                   value={slotRoom}
                   onChange={(e) => setSlotRoom(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm placeholder-slate-500"
