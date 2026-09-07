@@ -32,7 +32,7 @@ export default function DashboardLayout({
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col md:flex-row">
       {/* ========================================================================= */}
-      {/* DESKTOP SIDEBAR (Visible on md and above)                                 */}
+      {/* DESKTOP SIDEBAR (Fixed 64 units wide)                                     */}
       {/* ========================================================================= */}
       <aside className="hidden md:flex flex-col w-64 border-r border-slate-800/80 bg-slate-900/60 backdrop-blur-xl p-5 shrink-0 fixed inset-y-0 left-0 z-30">
         {/* Brand Header */}
@@ -81,7 +81,7 @@ export default function DashboardLayout({
       </aside>
 
       {/* ========================================================================= */}
-      {/* MOBILE TOP BAR (Brand Header on small viewports)                          */}
+      {/* MOBILE TOP BAR (Brand Header on small viewports)                           */}
       {/* ========================================================================= */}
       <header className="md:hidden sticky top-0 z-40 flex items-center justify-between px-4 py-3 bg-slate-900/90 backdrop-blur-lg border-b border-slate-800">
         <div className="flex items-center gap-2.5">
@@ -99,11 +99,13 @@ export default function DashboardLayout({
       </header>
 
       {/* ========================================================================= */}
-      {/* MAIN CONTENT REGION                                                       */}
+      {/* MAIN CONTENT REGION (md:pl-64 aur w-full add kiya hai desktop fix ke liye) */}
       {/* ========================================================================= */}
-      <main className="flex-1 overflow-y-auto pb-24 md:pb-6 px-4 sm:px-6 lg:px-8">
-  {children}
-</main>
+      <main className="flex-1 overflow-y-auto pb-24 md:pb-8 pt-4 md:pt-6 px-4 sm:px-6 lg:px-8 md:pl-72 w-full min-w-0">
+        <div className="max-w-7xl mx-auto w-full">
+          {children}
+        </div>
+      </main>
 
       {/* ========================================================================= */}
       {/* MOBILE BOTTOM DOCK (Sticky on phones, hidden on desktop)                  */}
