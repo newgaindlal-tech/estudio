@@ -54,11 +54,11 @@ export default function TimetablePage() {
   const [slots, setSlots] = useState<TimetableSlot[]>([]);
   const [todayRecords, setTodayRecords] = useState<AttendanceRecord[]>([]);
 
-  // Modal / Add Slot Form State
+  // Modal / Add Slot Form State (Timings optional: default empty)
   const [showAddModal, setShowAddModal] = useState(false);
   const [selectedSubjectId, setSelectedSubjectId] = useState('');
-  const [startTime, setStartTime] = useState('09:00');
-  const [endTime, setEndTime] = useState('10:00');
+  const [startTime, setStartTime] = useState('');
+  const [endTime, setEndTime] = useState('');
   const [slotRoom, setSlotRoom] = useState('');
 
   const todayDateStr = new Date().toISOString().split('T')[0];
@@ -93,7 +93,7 @@ export default function TimetablePage() {
   const daySlots = useMemo(() => {
     return slots
       .filter((s) => s.day_of_week === selectedDay)
-      .sort((a, b) => a.start_time.localeCompare(b.start_time));
+      .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
   }, [slots, selectedDay]);
 
   const handleMarkAttendance = async (subjectId: string, status: AttendanceStatus) => {
@@ -139,11 +139,13 @@ export default function TimetablePage() {
       user_id: user.id,
       subject_id: selectedSubjectId,
       day_of_week: selectedDay,
-      start_time: startTime,
-      end_time: endTime,
+      start_time: startTime.trim() || null,
+      end_time: endTime.trim() || null,
       room_number: slotRoom.trim() || chosenSub?.room_number || null,
     });
 
+    setStartTime('');
+    setEndTime('');
     setSlotRoom('');
     setShowAddModal(false);
     await fetchData();
@@ -157,9 +159,12 @@ export default function TimetablePage() {
     setActionLoading(false);
   };
 
-  const formatTimeDisplay = (timeStr: string) => {
-    const [h, m] = timeStr.split(':');
-    const hour = parseInt(h, 10);
+  const formatTimeDisplay = (timeStr?: string | null) => {
+    if (!timeStr) return null;
+    const parts = timeStr.split(':');
+    if (parts.length < 2) return null;
+    const hour = parseInt(parts[0], 10);
+    const m = parts[1];
     const ampm = hour >= 12 ? 'PM' : 'AM';
     const formattedHour = hour % 12 || 12;
     return `${formattedHour}:${m} ${ampm}`;
@@ -203,7 +208,7 @@ export default function TimetablePage() {
         </button>
       </div>
 
-      {/* 7-DAY HORIZONTAL SCROLL NAVIGATOR (Zero squeeze on mobile) */}
+      {/* 7-DAY HORIZONTAL SCROLL NAVIGATOR */}
       <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-1.5 sm:p-2 shadow-xl">
         <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
           {DAYS.map((day) => {
@@ -221,7 +226,6 @@ export default function TimetablePage() {
                     : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
                 }`}
               >
-                {/* Active Day Indicator dot */}
                 {isToday && (
                   <span
                     className={`absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full ${
@@ -267,7 +271,7 @@ export default function TimetablePage() {
         </span>
       </div>
 
-      {/* TIMELINE LIST FOR SELECTED DAY */}
+      {/* TIMELINE LIST */}
       {daySlots.length === 0 ? (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl p-8 sm:p-12 text-center space-y-3">
           <Clock className="w-10 h-10 text-slate-600 mx-auto" />
@@ -290,13 +294,14 @@ export default function TimetablePage() {
           {daySlots.map((slot, index) => {
             const sub = subjects.find((s) => s.id === slot.subject_id);
             const todayRec = todayRecords.find((r) => r.subject_id === slot.subject_id);
+            const formattedStart = formatTimeDisplay(slot.start_time);
+            const formattedEnd = formatTimeDisplay(slot.end_time);
 
             return (
               <div
                 key={slot.id}
                 className="bg-slate-900 border border-slate-800 hover:border-slate-700/80 rounded-2xl p-3.5 sm:p-5 flex flex-col gap-3.5 transition shadow-sm"
               >
-                {/* Top: Period, Subject & Delete */}
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-start gap-3 min-w-0">
                     <div className="w-9 h-9 rounded-xl bg-amber-950/60 border border-amber-800/60 text-amber-300 font-bold flex items-center justify-center text-xs sm:text-sm font-mono flex-shrink-0 mt-0.5">
@@ -316,10 +321,13 @@ export default function TimetablePage() {
                       </div>
 
                       <div className="flex flex-wrap items-center gap-2.5 text-xs text-slate-400">
-                        <span className="flex items-center gap-1 font-mono text-amber-400 font-medium text-[11px] sm:text-xs">
-                          <Clock className="w-3 h-3 flex-shrink-0" />
-                          {formatTimeDisplay(slot.start_time)} – {formatTimeDisplay(slot.end_time)}
-                        </span>
+                        {/* Render time ONLY if present */}
+                        {formattedStart && (
+                          <span className="flex items-center gap-1 font-mono text-amber-400 font-medium text-[11px] sm:text-xs">
+                            <Clock className="w-3 h-3 flex-shrink-0" />
+                            {formattedStart} {formattedEnd ? `– ${formattedEnd}` : ''}
+                          </span>
+                        )}
 
                         {(slot.room_number || sub?.room_number) && (
                           <span className="flex items-center gap-1 text-[11px] sm:text-xs">
@@ -338,7 +346,6 @@ export default function TimetablePage() {
                     </div>
                   </div>
 
-                  {/* Remove Slot */}
                   <button
                     onClick={() => handleDeleteSlot(slot.id)}
                     className="p-2 text-slate-500 hover:text-rose-400 bg-slate-950/60 border border-slate-800/80 hover:border-slate-700 rounded-lg transition flex-shrink-0"
@@ -348,7 +355,7 @@ export default function TimetablePage() {
                   </button>
                 </div>
 
-                {/* Bottom: Attendance action row */}
+                {/* Quick Attendance Row */}
                 {selectedDay === todayDay && (
                   <div className="flex items-center justify-between gap-2 pt-2.5 border-t border-slate-800/60">
                     <span className="text-[11px] text-slate-400 font-medium">Quick Attendance:</span>
@@ -400,7 +407,7 @@ export default function TimetablePage() {
         </div>
       )}
 
-      {/* MODAL: ADD TIMETABLE SLOT (Mobile-Safe with Max Height & Scroll) */}
+      {/* MODAL: ADD TIMETABLE SLOT */}
       {showAddModal && (
         <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-3.5 backdrop-blur-sm overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-5 sm:p-6 max-w-md w-full shadow-2xl space-y-4 my-auto max-h-[90dvh] overflow-y-auto">
@@ -425,22 +432,21 @@ export default function TimetablePage() {
                 </select>
               </div>
 
+              {/* Start & End Time (Now Fully Optional) */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-400 font-semibold mb-1">Start Time</label>
+                  <label className="block text-slate-400 font-semibold mb-1">Start Time (Optional)</label>
                   <input
                     type="time"
-                    required
                     value={startTime}
                     onChange={(e) => setStartTime(e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm font-mono"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-400 font-semibold mb-1">End Time</label>
+                  <label className="block text-slate-400 font-semibold mb-1">End Time (Optional)</label>
                   <input
                     type="time"
-                    required
                     value={endTime}
                     onChange={(e) => setEndTime(e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm font-mono"
@@ -452,7 +458,7 @@ export default function TimetablePage() {
                 <label className="block text-slate-400 font-semibold mb-1">Room / Hall (Optional)</label>
                 <input
                   type="text"
-                  placeholder="Enter Room / Hall)"
+                  placeholder="Enter room/hall"
                   value={slotRoom}
                   onChange={(e) => setSlotRoom(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm placeholder-slate-500"
