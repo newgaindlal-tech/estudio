@@ -196,7 +196,7 @@ export default function SettingsPage() {
               required
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
-              placeholder="e.g. Gaindlal Kosma"
+              placeholder="Enter your full name"
               className="w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -210,7 +210,7 @@ export default function SettingsPage() {
               type="text"
               value={collegeName}
               onChange={(e) => setCollegeName(e.target.value)}
-              placeholder="e.g. Government Engineering College"
+              placeholder="Enter your college name"
               className="w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
@@ -224,7 +224,7 @@ export default function SettingsPage() {
               type="text"
               value={department}
               onChange={(e) => setDepartment(e.target.value)}
-              placeholder="e.g. Electrical Engineering"
+              placeholder="Enter your department"
               className="w-full rounded-lg bg-slate-800 border border-slate-700 px-3 py-2 text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
