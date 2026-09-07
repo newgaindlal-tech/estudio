@@ -27,12 +27,10 @@ import {
   Loader2,
   Sparkles,
   Sun,
-  ShieldCheck,
   FileText,
   Eye,
   ExternalLink,
   ChevronRight,
-  BookOpen,
 } from 'lucide-react';
 
 const DAY_MAP: Record<number, DayOfWeek> = {
@@ -98,7 +96,6 @@ export default function DashboardOverview() {
       return;
     }
 
-    // Try reading profile full_name
     const { data: profile } = await supabase
       .from('profiles')
       .select('full_name')
@@ -149,7 +146,7 @@ export default function DashboardOverview() {
     return { percentage: pct, attended: totalAttended, missed: totalMissed, total: effective };
   }, [subjects, records]);
 
-  // Per-Subject Analysis: Below Target & Close to Target
+  // Per-Subject Analysis
   const subjectAnalysis = useMemo(() => {
     const below: Array<{ subject: Subject; pct: number; needed: number; target: number }> = [];
     const close: Array<{ subject: Subject; pct: number; canMiss: number; target: number }> = [];
@@ -167,11 +164,9 @@ export default function DashboardOverview() {
       const currentPct = Math.round((attended / effective) * 1000) / 10;
 
       if (currentPct < target) {
-        // Below target: calculate consecutive needed
         const needed = Math.ceil((T * effective - attended) / (1 - T));
         below.push({ subject: sub, pct: currentPct, needed: Math.max(1, needed), target });
       } else {
-        // At or above target: check if close (can miss 0 or 1 class)
         const canMiss = Math.floor(attended / T - effective);
         if (canMiss <= 1) {
           close.push({ subject: sub, pct: currentPct, canMiss: Math.max(0, canMiss), target });
@@ -182,21 +177,21 @@ export default function DashboardOverview() {
     return { below, close };
   }, [subjects, records]);
 
-  // Today's Scheduled Classes & Attendance Tagging
+  // Today's Scheduled Classes (Safe Sort for null times)
   const todaySlots = useMemo(() => {
     return timetableSlots
       .filter((s) => s.day_of_week === todayDay)
-      .sort((a, b) => a.start_time.localeCompare(b.start_time));
+      .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
   }, [timetableSlots, todayDay]);
 
-  // Tomorrow's Scheduled Classes (Upcoming Attendance)
+  // Tomorrow's Scheduled Classes (Safe Sort for null times)
   const tomorrowSlots = useMemo(() => {
     return timetableSlots
       .filter((s) => s.day_of_week === tomorrowDay)
-      .sort((a, b) => a.start_time.localeCompare(b.start_time));
+      .sort((a, b) => (a.start_time || '').localeCompare(b.start_time || ''));
   }, [timetableSlots, tomorrowDay]);
 
-  // Quick Attendance Mark handler from Dashboard
+  // Quick Attendance Handler
   const handleMarkTodayAttendance = async (subjectId: string, status: AttendanceStatus) => {
     setActionLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
@@ -237,15 +232,19 @@ export default function DashboardOverview() {
       if (error || !data?.signedUrl) throw error || new Error('Failed to generate link');
       setPreviewDoc({ title: doc.title, url: data.signedUrl, mimeType: doc.mime_type });
     } catch {
-      // Handled silently
+      // Handled gracefully
     } finally {
       setActionLoading(false);
     }
   };
 
-  const formatSlotTime = (t: string) => {
-    const [h, m] = t.split(':');
-    const hour = parseInt(h, 10);
+  // Optional Safe Time Formatter
+  const formatSlotTime = (t?: string | null) => {
+    if (!t) return null;
+    const parts = t.split(':');
+    if (parts.length < 2) return null;
+    const hour = parseInt(parts[0], 10);
+    const m = parts[1];
     const ampm = hour >= 12 ? 'PM' : 'AM';
     const formattedHour = hour % 12 || 12;
     return `${formattedHour}:${m} ${ampm}`;
@@ -260,13 +259,11 @@ export default function DashboardOverview() {
     );
   }
 
-  // USEFUL EMPTY STATE FOR NEW USERS
   const isNewUser = subjects.length === 0 && timetableSlots.length === 0 && documents.length === 0;
 
   if (isNewUser) {
     return (
       <div className="max-w-4xl mx-auto space-y-8 py-4">
-        {/* Welcome Header */}
         <div className="text-center space-y-2">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-950/60 border border-blue-900 text-blue-300 text-xs font-semibold">
             <Sparkles className="w-3.5 h-3.5" /> Welcome to Estudio
@@ -277,7 +274,6 @@ export default function DashboardOverview() {
           </p>
         </div>
 
-        {/* 3-Step Guided Onboarding */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 flex flex-col justify-between space-y-4">
             <div className="space-y-2">
@@ -345,7 +341,6 @@ export default function DashboardOverview() {
     );
   }
 
-  // ACTIVE DASHBOARD VIEW
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       {/* Top Banner & Quick Utility Shortcuts */}
@@ -361,7 +356,6 @@ export default function DashboardOverview() {
           </p>
         </div>
 
-        {/* Quick Deep-Link Action Shortcuts */}
         <div className="flex items-center gap-2 text-xs font-semibold">
           <Link
             href="/calculator"
@@ -389,7 +383,6 @@ export default function DashboardOverview() {
 
       {/* METRIC OVERVIEW CARDS */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
-        {/* Card 1: Overall Attendance */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
           <span className="text-xs text-slate-400 font-semibold uppercase tracking-wider">Overall Attendance</span>
           <div className="mt-2">
@@ -402,7 +395,6 @@ export default function DashboardOverview() {
           </div>
         </div>
 
-        {/* Card 2: Subjects Below Target */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
           <span className="text-xs text-rose-400 font-semibold uppercase tracking-wider flex items-center gap-1">
             <AlertCircle className="w-3.5 h-3.5" /> Below Target
@@ -413,7 +405,6 @@ export default function DashboardOverview() {
           </div>
         </div>
 
-        {/* Card 3: Subjects Close to Target */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
           <span className="text-xs text-amber-400 font-semibold uppercase tracking-wider flex items-center gap-1">
             <AlertTriangle className="w-3.5 h-3.5" /> Close to Threshold
@@ -424,7 +415,6 @@ export default function DashboardOverview() {
           </div>
         </div>
 
-        {/* Card 4: Today's Classes */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-4 flex flex-col justify-between">
           <span className="text-xs text-blue-400 font-semibold uppercase tracking-wider flex items-center gap-1">
             <Clock className="w-3.5 h-3.5" /> Today&apos;s Lectures
@@ -436,10 +426,9 @@ export default function DashboardOverview() {
         </div>
       </div>
 
-      {/* WARNING NOTIFICATIONS: BELOW & CLOSE TO TARGET SUBJECTS */}
+      {/* WARNING NOTIFICATIONS */}
       {(subjectAnalysis.below.length > 0 || subjectAnalysis.close.length > 0) && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Below Target Warning Panel */}
           {subjectAnalysis.below.length > 0 && (
             <div className="bg-rose-950/30 border border-rose-900/60 rounded-xl p-4 space-y-3">
               <div className="flex items-center gap-2 text-rose-300 font-bold text-xs uppercase tracking-wider">
@@ -467,7 +456,6 @@ export default function DashboardOverview() {
             </div>
           )}
 
-          {/* Close to Target Warning Panel */}
           {subjectAnalysis.close.length > 0 && (
             <div className="bg-amber-950/30 border border-amber-900/60 rounded-xl p-4 space-y-3">
               <div className="flex items-center gap-2 text-amber-300 font-bold text-xs uppercase tracking-wider">
@@ -497,9 +485,8 @@ export default function DashboardOverview() {
         </div>
       )}
 
-      {/* MAIN CONTENT SPLIT: TODAY'S ATTENDANCE & UPCOMING / DOCUMENTS */}
+      {/* TODAY'S ATTENDANCE & UPCOMING / DOCUMENTS */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left 2 Columns: Today's Schedule & Attendance Marking */}
         <div className="lg:col-span-2 space-y-4">
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -539,6 +526,8 @@ export default function DashboardOverview() {
                   const todayRec = records.find(
                     (r) => r.subject_id === slot.subject_id && r.session_date === todayStr
                   );
+                  const startFormatted = formatSlotTime(slot.start_time);
+                  const endFormatted = formatSlotTime(slot.end_time);
 
                   return (
                     <div
@@ -555,14 +544,17 @@ export default function DashboardOverview() {
                           )}
                         </div>
                         <div className="flex items-center gap-3 text-[11px] text-slate-400">
-                          <span className="text-amber-400 font-mono font-medium">
-                            {formatSlotTime(slot.start_time)} – {formatSlotTime(slot.end_time)}
-                          </span>
-                          {slot.room_number && <span>• Room {slot.room_number}</span>}
+                          {/* Timing rendered ONLY if available */}
+                          {startFormatted && (
+                            <span className="text-amber-400 font-mono font-medium flex items-center gap-1">
+                              <Clock className="w-3 h-3 flex-shrink-0" />
+                              {startFormatted} {endFormatted ? `– ${endFormatted}` : ''}
+                            </span>
+                          )}
+                          {slot.room_number && <span>Room {slot.room_number}</span>}
                         </div>
                       </div>
 
-                      {/* Direct Attendance Toggle */}
                       <div className="flex items-center gap-1.5 self-end sm:self-auto">
                         <button
                           disabled={actionLoading}
@@ -598,7 +590,7 @@ export default function DashboardOverview() {
                           }`}
                           title="Cancelled / Off"
                         >
-                          <Slash className="w-3 h-3" />
+                          <Slash className="w-3.5 h-3.5" />
                         </button>
                       </div>
                     </div>
@@ -608,7 +600,7 @@ export default function DashboardOverview() {
             )}
           </div>
 
-          {/* Tomorrow's Schedule (Upcoming Attendance Preview) */}
+          {/* Tomorrow's Schedule */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-3">
             <div className="flex items-center justify-between border-b border-slate-800 pb-2.5">
               <h3 className="font-bold text-white text-xs flex items-center gap-2">
@@ -626,6 +618,8 @@ export default function DashboardOverview() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 {tomorrowSlots.map((slot) => {
                   const sub = subjects.find((s) => s.id === slot.subject_id);
+                  const startFormatted = formatSlotTime(slot.start_time);
+
                   return (
                     <div
                       key={slot.id}
@@ -633,9 +627,11 @@ export default function DashboardOverview() {
                     >
                       <div className="flex items-center justify-between">
                         <span className="font-semibold text-white truncate">{sub?.name || 'Class'}</span>
-                        <span className="text-[10px] text-amber-400 font-mono">
-                          {formatSlotTime(slot.start_time)}
-                        </span>
+                        {startFormatted && (
+                          <span className="text-[10px] text-amber-400 font-mono">
+                            {startFormatted}
+                          </span>
+                        )}
                       </div>
                       {slot.room_number && (
                         <p className="text-[10px] text-slate-500">Room: {slot.room_number}</p>
