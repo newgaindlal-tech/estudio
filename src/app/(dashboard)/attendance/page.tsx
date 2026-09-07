@@ -827,7 +827,7 @@ export default function AttendanceManagerPage() {
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Electrical Power Systems"
+                  placeholder="Enter subject name"
                   value={subName}
                   onChange={(e) => setSubName(e.target.value)}
                   className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none"
@@ -839,7 +839,7 @@ export default function AttendanceManagerPage() {
                   <label className="block text-slate-400 font-semibold mb-1">Subject Code</label>
                   <input
                     type="text"
-                    placeholder="e.g. EE302"
+                    placeholder="Enter subject code"
                     value={subCode}
                     onChange={(e) => setSubCode(e.target.value)}
                     className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm"
