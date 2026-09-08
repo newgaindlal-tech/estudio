@@ -42,15 +42,15 @@ export default function LoginPage() {
 
   return (
     <>
-      <head>
-        <title>Sign In | Estudio - Student Workspace</title>
-        <meta
-          name="description"
-          content="Sign in to access your college timetable, attendance manager, and student workspace."
-        />
-        <link rel="canonical" href="https://estudioworkspace.vercel.app/login" />
-        <meta name="robots" content="index, follow" />
-      </head>
+     <head>
+  <title>Sign In | Estudio - Student Workspace</title>
+  <meta
+    name="description"
+    content="Sign in to your Estudio student workspace to access timetable, attendance tracking, and utilities."
+  />
+  <link rel="canonical" href="https://estudioworkspace.vercel.app/login" />
+  <meta name="robots" content="index, follow" />
+</head>
 
       <div className="min-h-[100dvh] bg-slate-950 flex flex-col justify-center py-6 sm:py-12 px-4 sm:px-6 lg:px-8">
         {/* Brand Header */}
