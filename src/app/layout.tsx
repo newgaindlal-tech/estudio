@@ -5,6 +5,7 @@ export const viewport: Viewport = {
   themeColor: '#020617',
   width: 'device-width',
   initialScale: 1,
+  maximumScale: 5,
 };
 
 export const metadata: Metadata = {
@@ -13,13 +14,16 @@ export const metadata: Metadata = {
     default: 'Estudio - Student Workspace',
     template: '%s | Estudio',
   },
-  description: 'Manage college routine, timetable, attendance tracking, and study utilities.',
+  description: 'Manage college routine, timetable, attendance tracking, and utilities.',
   alternates: {
     canonical: '/',
   },
   robots: {
     index: true,
     follow: true,
+  },
+  icons: {
+    icon: '/favicon.ico',
   },
 };
 
