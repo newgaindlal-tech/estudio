@@ -23,6 +23,7 @@ import {
   Plus,
   CheckCircle2,
   ExternalLink,
+  ShieldAlert,
 } from 'lucide-react';
 
 const CATEGORIES: VaultCategory[] = [
@@ -34,7 +35,7 @@ const CATEGORIES: VaultCategory[] = [
 ];
 
 export default function DocumentVaultPage() {
-  const supabase = createClient();
+  const supabase = useMemo(() => createClient(), []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const replaceFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -63,31 +64,53 @@ export default function DocumentVaultPage() {
   const [editExpiryDate, setEditExpiryDate] = useState('');
   const [editNotes, setEditNotes] = useState('');
 
+  // Modal: Deletion Confirmation
+  const [deletingDoc, setDeletingDoc] = useState<DocumentMetadata | null>(null);
+
   // Modal: File Preview
   const [previewDoc, setPreviewDoc] = useState<{ title: string; url: string; mimeType: string } | null>(null);
   const [targetDocForReplace, setTargetDocForReplace] = useState<DocumentMetadata | null>(null);
 
   const fetchDocuments = useCallback(async () => {
-    setLoading(true);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    try {
+      setLoading(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) return;
 
-    const { data, error } = await supabase
-      .from('documents')
-      .select('*')
-      .order('created_at', { ascending: false });
+      const { data, error } = await supabase
+        .from('documents')
+        .select('*')
+        .order('created_at', { ascending: false });
 
-    if (error) {
-      setFeedback({ type: 'error', text: `Failed to load vault: ${error.message}` });
-    } else if (data) {
-      setDocuments(data as DocumentMetadata[]);
+      if (error) {
+        setFeedback({ type: 'error', text: `Failed to load vault records: ${error.message}` });
+      } else if (data) {
+        setDocuments(data as DocumentMetadata[]);
+      }
+    } catch (err: any) {
+      setFeedback({ type: 'error', text: err?.message || 'Error loading vault records.' });
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, [supabase]);
 
   useEffect(() => {
     fetchDocuments();
   }, [fetchDocuments]);
+
+  // Modal ESC Key Listener
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (previewDoc) setPreviewDoc(null);
+        if (showUploadModal) setShowUploadModal(false);
+        if (editingDoc) setEditingDoc(null);
+        if (deletingDoc) setDeletingDoc(null);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [previewDoc, showUploadModal, editingDoc, deletingDoc]);
 
   const filteredDocs = useMemo(() => {
     return documents.filter((doc) => {
@@ -102,22 +125,23 @@ export default function DocumentVaultPage() {
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!uploadFile || !uploadTitle.trim()) {
-      setFeedback({ type: 'error', text: 'Please choose a file and title.' });
+      setFeedback({ type: 'error', text: 'Please select a file and assign a document title.' });
       return;
     }
 
     const validation = validateUploadedFile(uploadFile);
     if (!validation.valid) {
-      setFeedback({ type: 'error', text: validation.error || 'Invalid file format.' });
+      setFeedback({ type: 'error', text: validation.error || 'Invalid file format or file size exceeded.' });
       return;
     }
 
     setActionLoading(true);
     setFeedback(null);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
 
     try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('User session not found.');
+
       const fileExt = uploadFile.name.split('.').pop()?.toLowerCase();
       const uniqueId = crypto.randomUUID();
       const storagePath = `${user.id}/${uniqueId}.${fileExt}`;
@@ -149,7 +173,7 @@ export default function DocumentVaultPage() {
 
       if (dbError) throw dbError;
 
-      setFeedback({ type: 'success', text: `"${cleanTitle}" saved to your private vault.` });
+      setFeedback({ type: 'success', text: `"${cleanTitle}" saved to encrypted vault.` });
       setShowUploadModal(false);
       setUploadFile(null);
       setUploadTitle('');
@@ -159,7 +183,7 @@ export default function DocumentVaultPage() {
       setUploadNotes('');
       await fetchDocuments();
     } catch (err: any) {
-      setFeedback({ type: 'error', text: err.message || 'Upload failed.' });
+      setFeedback({ type: 'error', text: err.message || 'File upload failed.' });
     } finally {
       setActionLoading(false);
     }
@@ -173,7 +197,7 @@ export default function DocumentVaultPage() {
         .from('vault')
         .createSignedUrl(doc.file_path, 60);
 
-      if (error || !data?.signedUrl) throw error || new Error('Could not create secure link.');
+      if (error || !data?.signedUrl) throw error || new Error('Failed to generate secure URL.');
 
       setPreviewDoc({
         title: doc.title,
@@ -181,7 +205,7 @@ export default function DocumentVaultPage() {
         mimeType: doc.mime_type,
       });
     } catch (err: any) {
-      setFeedback({ type: 'error', text: `View error: ${err.message}` });
+      setFeedback({ type: 'error', text: `Document view error: ${err.message}` });
     } finally {
       setActionLoading(false);
     }
@@ -209,19 +233,25 @@ export default function DocumentVaultPage() {
     }
   };
 
-  const handleDeleteDocument = async (doc: DocumentMetadata) => {
-    if (!confirm(`Permanently delete "${doc.title}" from your vault?`)) return;
+  const confirmDeleteDocument = async () => {
+    if (!deletingDoc) return;
+    const target = deletingDoc;
+    const previous = [...documents];
+
+    // Optimistic removal
+    setDocuments((prev) => prev.filter((d) => d.id !== target.id));
+    setDeletingDoc(null);
     setActionLoading(true);
     setFeedback(null);
 
     try {
-      await supabase.storage.from('vault').remove([doc.file_path]);
-      const { error: dbError } = await supabase.from('documents').delete().eq('id', doc.id);
+      await supabase.storage.from('vault').remove([target.file_path]);
+      const { error: dbError } = await supabase.from('documents').delete().eq('id', target.id);
       if (dbError) throw dbError;
 
-      setFeedback({ type: 'success', text: `"${doc.title}" removed.` });
-      await fetchDocuments();
+      setFeedback({ type: 'success', text: `"${target.title}" permanently removed.` });
     } catch (err: any) {
+      setDocuments(previous);
       setFeedback({ type: 'error', text: `Deletion failed: ${err.message}` });
     } finally {
       setActionLoading(false);
@@ -248,7 +278,7 @@ export default function DocumentVaultPage() {
 
       if (error) throw error;
 
-      setFeedback({ type: 'success', text: 'Document details updated.' });
+      setFeedback({ type: 'success', text: 'Document metadata updated.' });
       setEditingDoc(null);
       await fetchDocuments();
     } catch (err: any) {
@@ -291,7 +321,7 @@ export default function DocumentVaultPage() {
 
       if (dbError) throw dbError;
 
-      setFeedback({ type: 'success', text: `File for "${targetDocForReplace.title}" replaced.` });
+      setFeedback({ type: 'success', text: `File for "${targetDocForReplace.title}" updated.` });
       setTargetDocForReplace(null);
       await fetchDocuments();
     } catch (err: any) {
@@ -310,14 +340,14 @@ export default function DocumentVaultPage() {
   if (loading) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[50vh] gap-3">
-        <Loader2 className="w-8 h-8 animate-spin text-emerald-500" />
-        <p className="text-xs text-slate-400 font-medium">Loading vault...</p>
+        <Loader2 className="w-8 h-8 animate-spin text-brand-500" />
+        <p className="text-xs text-content-muted font-medium">Decrypting vault metadata...</p>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 select-none pb-16">
       <input
         type="file"
         ref={replaceFileInputRef}
@@ -327,85 +357,102 @@ export default function DocumentVaultPage() {
       />
 
       {/* Header Banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-slate-800/80 pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-canvas-border pb-4">
         <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2.5">
-            <FolderArchive className="w-6 h-6 text-emerald-500" />
+          <h1 className="text-xl sm:text-2xl font-bold text-content-primary flex items-center gap-2.5">
+            <FolderArchive className="w-6 h-6 text-brand-400" />
             Document Vault
-          </h2>
-          <p className="text-slate-400 text-xs mt-0.5">
-            Encrypted personal vault for college credentials and certificates.
+          </h1>
+          <p className="text-content-secondary text-xs mt-0.5">
+            Encrypted institutional storage for college IDs, admit cards, and certificates.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => setShowUploadModal(true)}
-            className="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 shadow-sm shadow-emerald-600/20"
-          >
-            <Upload className="w-4 h-4" />
-            Upload Document
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => setShowUploadModal(true)}
+          className="btn-primary px-4 py-2.5 text-xs font-bold shadow-brand-glow self-start sm:self-auto"
+        >
+          <Upload className="w-4 h-4" />
+          <span>Upload Document</span>
+        </button>
       </div>
 
-      {/* Feedback Banner */}
+      {/* Dynamic Feedback Banner */}
       {feedback && (
         <div
-          className={`p-3.5 rounded-xl text-xs flex items-center justify-between gap-2.5 border ${
+          role="alert"
+          className={`p-3.5 rounded-xl text-xs flex items-center justify-between gap-2.5 border shadow-sm animate-in fade-in duration-150 ${
             feedback.type === 'success'
-              ? 'bg-emerald-950/60 border-emerald-800 text-emerald-200'
-              : 'bg-rose-950/60 border-rose-800 text-rose-200'
+              ? 'bg-status-success-bg border-status-success/40 text-emerald-300'
+              : 'bg-status-danger-bg border-status-danger/40 text-rose-300'
           }`}
         >
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2.5">
             {feedback.type === 'success' ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-status-success" />
             ) : (
-              <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
+              <AlertCircle className="w-4 h-4 shrink-0 text-status-danger" />
             )}
-            <span>{feedback.text}</span>
+            <span className="font-medium">{feedback.text}</span>
           </div>
-          <button onClick={() => setFeedback(null)} className="text-slate-400 hover:text-white">
+          <button
+            type="button"
+            onClick={() => setFeedback(null)}
+            className="p-1 text-content-muted hover:text-content-primary transition-colors rounded"
+            aria-label="Dismiss feedback alert"
+          >
             <X className="w-3.5 h-3.5" />
           </button>
         </div>
       )}
 
-      {/* Search & Filter Toolbar */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-xl p-3 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      {/* Search & Category Filter Toolbar */}
+      <div className="bg-canvas-subtle border border-canvas-border rounded-2xl p-3.5 sm:p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-sm">
         <div className="relative flex-1">
-          <Search className="w-4 h-4 text-slate-500 absolute left-3 top-2.5" />
+          <Search className="w-4 h-4 text-content-muted absolute left-3.5 top-3" />
           <input
             type="text"
-            placeholder="Search by title or notes..."
+            placeholder="Search documents by title or notes..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-slate-950 border border-slate-800 pl-9 pr-3 py-1.5 rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+            className="w-full h-10 bg-canvas-surface border border-canvas-border pl-10 pr-9 rounded-xl text-xs text-content-primary placeholder:text-content-muted outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30 transition-all shadow-inner"
           />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute inset-y-0 right-0 pr-3 flex items-center text-content-muted hover:text-content-primary"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
 
-        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 text-xs">
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0 text-xs scrollbar-none">
           <button
+            type="button"
             onClick={() => setSelectedCategory('ALL')}
-            className={`px-3 py-1 rounded-lg font-semibold whitespace-nowrap transition ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border outline-none ${
               selectedCategory === 'ALL'
-                ? 'bg-emerald-600 text-white'
-                : 'bg-slate-800 text-slate-400 hover:text-white'
+                ? 'bg-brand-500 text-white border-brand-400 shadow-sm font-bold shadow-brand-glow'
+                : 'bg-canvas-surface text-content-secondary border-canvas-border hover:bg-canvas-elevated hover:text-content-primary'
             }`}
           >
             All ({documents.length})
           </button>
           {CATEGORIES.map((cat) => {
             const count = documents.filter((d) => d.category === cat).length;
+            const isSelected = selectedCategory === cat;
             return (
               <button
                 key={cat}
+                type="button"
                 onClick={() => setSelectedCategory(cat)}
-                className={`px-3 py-1 rounded-lg font-semibold whitespace-nowrap transition ${
-                  selectedCategory === cat
-                    ? 'bg-emerald-600 text-white'
-                    : 'bg-slate-800 text-slate-400 hover:text-white'
+                className={`px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border outline-none ${
+                  isSelected
+                    ? 'bg-brand-500 text-white border-brand-400 shadow-sm font-bold shadow-brand-glow'
+                    : 'bg-canvas-surface text-content-secondary border-canvas-border hover:bg-canvas-elevated hover:text-content-primary'
                 }`}
               >
                 {cat} ({count})
@@ -417,20 +464,21 @@ export default function DocumentVaultPage() {
 
       {/* Grid of Documents */}
       {filteredDocs.length === 0 ? (
-        <div className="bg-slate-900/60 border border-slate-800 rounded-2xl p-10 text-center space-y-3">
-          <FolderArchive className="w-10 h-10 text-slate-600 mx-auto" />
-          <h3 className="font-bold text-white text-base">No documents found</h3>
-          <p className="text-slate-400 text-xs max-w-sm mx-auto">
+        <div className="bg-canvas-subtle border border-canvas-border rounded-2xl p-10 text-center space-y-3 shadow-sm">
+          <FolderArchive className="w-10 h-10 text-content-muted mx-auto" />
+          <h2 className="font-bold text-content-primary text-base">No documents located</h2>
+          <p className="text-content-secondary text-xs max-w-sm mx-auto">
             {searchQuery || selectedCategory !== 'ALL'
-              ? 'No documents match your filter criteria.'
-              : 'Store your College ID, Admit Card, or Marksheets privately.'}
+              ? 'No records match your active query and category filters.'
+              : 'Keep certificates, marksheets, and identity credentials encrypted in your vault.'}
           </p>
           <button
+            type="button"
             onClick={() => setShowUploadModal(true)}
-            className="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-xl text-xs font-semibold inline-flex items-center gap-1.5 shadow-sm shadow-emerald-600/20"
+            className="btn-primary px-4 py-2.5 text-xs font-bold shadow-sm"
           >
             <Plus className="w-4 h-4" />
-            Upload File
+            <span>Upload New Document</span>
           </button>
         </div>
       ) : (
@@ -440,71 +488,76 @@ export default function DocumentVaultPage() {
             return (
               <div
                 key={doc.id}
-                className="bg-slate-900/90 border border-slate-800 hover:border-slate-700/80 rounded-2xl p-4 flex flex-col justify-between space-y-3 shadow-sm"
+                className="bg-canvas-subtle border border-canvas-border hover:border-canvas-border/80 rounded-2xl p-4 sm:p-5 flex flex-col justify-between space-y-4 shadow-sm transition-all"
               >
                 <div>
-                  <div className="flex items-center gap-2.5">
-                    <div className="p-2 rounded-xl bg-emerald-950/60 border border-emerald-900/60 text-emerald-400 shrink-0">
+                  <div className="flex items-center gap-3">
+                    <div className="p-3 rounded-xl bg-canvas-surface border border-canvas-border text-brand-400 shrink-0 shadow-inner">
                       {isPdf ? <FileText className="w-5 h-5" /> : <ImageIcon className="w-5 h-5" />}
                     </div>
-                    <div className="overflow-hidden">
-                      <h4 className="font-bold text-white text-sm truncate" title={doc.title}>
+                    <div className="min-w-0">
+                      <h3 className="font-bold text-content-primary text-sm truncate" title={doc.title}>
                         {doc.title}
-                      </h4>
-                      <span className="text-[10px] font-semibold text-emerald-400 font-mono">
+                      </h3>
+                      <span className="text-2xs font-bold text-brand-400 font-mono block mt-0.5">
                         {doc.category}
                       </span>
                     </div>
                   </div>
 
-                  <div className="mt-3 space-y-1 text-[11px] text-slate-400 bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
+                  <div className="mt-3.5 space-y-1 text-2xs text-content-secondary bg-canvas-surface p-3 rounded-xl border border-canvas-border font-mono shadow-inner">
                     <div className="flex justify-between">
-                      <span>Size:</span>
-                      <span className="font-mono text-slate-300">{formatFileSize(doc.file_size_bytes)}</span>
+                      <span className="text-content-muted font-sans font-medium">Size:</span>
+                      <span className="text-content-primary font-semibold">{formatFileSize(doc.file_size_bytes)}</span>
                     </div>
                     {doc.issue_date && (
                       <div className="flex justify-between">
-                        <span>Issued:</span>
-                        <span className="font-mono text-slate-300">{doc.issue_date}</span>
+                        <span className="text-content-muted font-sans font-medium">Issued:</span>
+                        <span className="text-content-primary font-semibold">{doc.issue_date}</span>
                       </div>
                     )}
                     {doc.expiry_date && (
                       <div className="flex justify-between">
-                        <span>Expires:</span>
-                        <span className="font-mono text-amber-400">{doc.expiry_date}</span>
+                        <span className="text-content-muted font-sans font-medium">Expires:</span>
+                        <span className="text-amber-400 font-semibold">{doc.expiry_date}</span>
                       </div>
                     )}
                     {doc.notes && (
-                      <p className="text-slate-400 italic pt-1 border-t border-slate-800/60 line-clamp-2">
+                      <p className="text-content-secondary italic pt-1.5 border-t border-canvas-border/60 line-clamp-2 font-sans font-normal">
                         &quot;{doc.notes}&quot;
                       </p>
                     )}
                   </div>
                 </div>
 
-                {/* Actions */}
-                <div className="pt-2 border-t border-slate-800 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-1">
+                {/* Actions Footer */}
+                <div className="pt-3 border-t border-canvas-border flex items-center justify-between text-xs">
+                  <div className="flex items-center gap-1.5">
                     <button
+                      type="button"
                       onClick={() => handleViewDocument(doc)}
                       disabled={actionLoading}
-                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+                      className="p-2 rounded-xl bg-canvas-surface hover:bg-canvas-elevated text-content-secondary hover:text-content-primary border border-canvas-border transition-colors outline-none shadow-sm"
                       title="View Document"
+                      aria-label={`View ${doc.title}`}
                     >
-                      <Eye className="w-3.5 h-3.5" />
+                      <Eye className="w-4 h-4" />
                     </button>
                     <button
+                      type="button"
                       onClick={() => handleDownloadDocument(doc)}
                       disabled={actionLoading}
-                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition"
+                      className="p-2 rounded-xl bg-canvas-surface hover:bg-canvas-elevated text-content-secondary hover:text-content-primary border border-canvas-border transition-colors outline-none shadow-sm"
                       title="Download"
+                      aria-label={`Download ${doc.title}`}
                     >
-                      <Download className="w-3.5 h-3.5" />
+                      <Download className="w-4 h-4" />
                     </button>
                   </div>
 
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-1.5">
                     <button
+                      type="button"
                       onClick={() => {
                         setEditingDoc(doc);
                         setEditTitle(doc.title);
@@ -513,28 +566,33 @@ export default function DocumentVaultPage() {
                         setEditExpiryDate(doc.expiry_date || '');
                         setEditNotes(doc.notes || '');
                       }}
-                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-blue-300 transition"
+                      className="p-2 rounded-xl bg-canvas-surface hover:bg-canvas-elevated text-content-secondary hover:text-content-primary border border-canvas-border transition-colors outline-none shadow-sm"
                       title="Edit Details"
+                      aria-label={`Edit ${doc.title}`}
                     >
-                      <Edit2 className="w-3.5 h-3.5" />
+                      <Edit2 className="w-4 h-4" />
                     </button>
                     <button
+                      type="button"
                       onClick={() => {
                         setTargetDocForReplace(doc);
                         replaceFileInputRef.current?.click();
                       }}
-                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-amber-300 transition"
+                      className="p-2 rounded-xl bg-canvas-surface hover:bg-canvas-elevated text-content-secondary hover:text-amber-400 border border-canvas-border transition-colors outline-none shadow-sm"
                       title="Replace File"
+                      aria-label={`Replace file for ${doc.title}`}
                     >
-                      <RefreshCw className="w-3.5 h-3.5" />
+                      <RefreshCw className="w-4 h-4" />
                     </button>
                     <button
-                      onClick={() => handleDeleteDocument(doc)}
+                      type="button"
+                      onClick={() => setDeletingDoc(doc)}
                       disabled={actionLoading}
-                      className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-rose-400 transition"
+                      className="p-2 rounded-xl bg-canvas-surface hover:bg-canvas-elevated text-content-muted hover:text-status-danger border border-canvas-border transition-colors outline-none shadow-sm"
                       title="Delete"
+                      aria-label={`Delete ${doc.title}`}
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
@@ -544,23 +602,34 @@ export default function DocumentVaultPage() {
         </div>
       )}
 
-      {/* UPLOAD MODAL */}
+      {/* MODAL: UPLOAD FILE */}
       {showUploadModal && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <Upload className="w-4 h-4 text-emerald-500" />
-                Upload Document
-              </h3>
-              <button onClick={() => setShowUploadModal(false)} className="text-slate-400 hover:text-white">
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-150"
+        >
+          <div className="bg-canvas-subtle border border-canvas-border rounded-2xl p-5 sm:p-7 max-w-md w-full shadow-elevated space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-canvas-border pb-3">
+              <h2 className="text-sm sm:text-base font-bold text-content-primary flex items-center gap-2">
+                <Upload className="w-4 h-4 text-brand-400" />
+                Upload New Document
+              </h2>
+              <button
+                type="button"
+                onClick={() => setShowUploadModal(false)}
+                className="p-1 text-content-muted hover:text-content-primary transition-colors rounded"
+                aria-label="Close upload dialog"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleUpload} className="space-y-3 text-xs">
+            <form onSubmit={handleUpload} className="space-y-3.5 text-xs">
               <div>
-                <label className="block text-slate-400 font-semibold mb-1">File (PDF or Image, max 10MB) *</label>
+                <label className="block text-content-secondary font-semibold mb-1.5">
+                  File Attachment (PDF / PNG / JPEG / WEBP, max 10MB) *
+                </label>
                 <input
                   type="file"
                   required
@@ -575,31 +644,31 @@ export default function DocumentVaultPage() {
                     }
                   }}
                   accept=".pdf,.png,.jpg,.jpeg,.webp"
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl p-2 text-white file:mr-3 file:py-1 file:px-2.5 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-emerald-600 file:text-white"
+                  className="w-full bg-canvas-surface border border-canvas-border rounded-xl p-2.5 text-content-primary file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-brand-500 file:text-white cursor-pointer shadow-inner"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-400 font-semibold mb-1">Document Title *</label>
+                <label className="block text-content-secondary font-semibold mb-1.5">Document Title *</label>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Final Semester ID Card"
+                  placeholder="e.g. Identity Card 2026"
                   value={uploadTitle}
                   onChange={(e) => setUploadTitle(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none"
+                  className="w-full h-11 bg-canvas-surface border border-canvas-border rounded-xl px-3.5 text-content-primary text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30 shadow-inner"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-400 font-semibold mb-1">Category *</label>
+                <label className="block text-content-secondary font-semibold mb-1.5">Category Classification *</label>
                 <select
                   value={uploadCategory}
                   onChange={(e) => setUploadCategory(e.target.value as VaultCategory)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none"
+                  className="w-full h-11 bg-canvas-surface border border-canvas-border rounded-xl px-3.5 text-content-primary text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30 cursor-pointer shadow-inner"
                 >
                   {CATEGORIES.map((cat) => (
-                    <option key={cat} value={cat}>
+                    <option key={cat} value={cat} className="bg-canvas-surface text-content-primary">
                       {cat}
                     </option>
                   ))}
@@ -608,51 +677,51 @@ export default function DocumentVaultPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-400 font-semibold mb-1">Issue Date</label>
+                  <label className="block text-content-secondary font-semibold mb-1.5">Issue Date</label>
                   <input
                     type="date"
                     value={uploadIssueDate}
                     onChange={(e) => setUploadIssueDate(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
+                    className="w-full h-10 bg-canvas-surface border border-canvas-border rounded-xl px-3 text-content-primary text-xs font-mono outline-none focus:border-brand-500 shadow-inner"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-400 font-semibold mb-1">Expiry Date</label>
+                  <label className="block text-content-secondary font-semibold mb-1.5">Expiry Date</label>
                   <input
                     type="date"
                     value={uploadExpiryDate}
                     onChange={(e) => setUploadExpiryDate(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
+                    className="w-full h-10 bg-canvas-surface border border-canvas-border rounded-xl px-3 text-content-primary text-xs font-mono outline-none focus:border-brand-500 shadow-inner"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-slate-400 font-semibold mb-1">Notes / Roll Number</label>
+                <label className="block text-content-secondary font-semibold mb-1.5">Reference Notes</label>
                 <textarea
                   rows={2}
-                  placeholder="e.g. Roll 220412"
+                  placeholder="e.g. Verified copy for semester admission"
                   value={uploadNotes}
                   onChange={(e) => setUploadNotes(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
+                  className="w-full bg-canvas-surface border border-canvas-border rounded-xl p-3 text-content-primary text-xs outline-none focus:border-brand-500 shadow-inner resize-none"
                 />
               </div>
 
-              <div className="flex gap-2 justify-end pt-3 border-t border-slate-800">
+              <div className="flex gap-2.5 justify-end pt-3 border-t border-canvas-border">
                 <button
                   type="button"
                   onClick={() => setShowUploadModal(false)}
-                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-xl font-semibold"
+                  className="btn-secondary px-4 py-2.5 text-xs font-semibold"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={actionLoading}
-                  className="bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2 rounded-xl font-semibold transition flex items-center gap-1.5"
+                  className="btn-primary px-5 py-2.5 text-xs font-bold shadow-brand-glow"
                 >
                   {actionLoading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  Save File
+                  <span>Save Document</span>
                 </button>
               </div>
             </form>
@@ -660,41 +729,50 @@ export default function DocumentVaultPage() {
         </div>
       )}
 
-      {/* RENAME / EDIT MODAL */}
+      {/* MODAL: EDIT METADATA */}
       {editingDoc && (
-        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 max-w-md w-full shadow-2xl space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <h3 className="text-base font-bold text-white flex items-center gap-2">
-                <Edit2 className="w-4 h-4 text-blue-400" />
-                Edit Document
-              </h3>
-              <button onClick={() => setEditingDoc(null)} className="text-slate-400 hover:text-white">
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-150"
+        >
+          <div className="bg-canvas-subtle border border-canvas-border rounded-2xl p-5 sm:p-7 max-w-md w-full shadow-elevated space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-canvas-border pb-3">
+              <h2 className="text-sm sm:text-base font-bold text-content-primary flex items-center gap-2">
+                <Edit2 className="w-4 h-4 text-brand-400" />
+                Edit Document Details
+              </h2>
+              <button
+                type="button"
+                onClick={() => setEditingDoc(null)}
+                className="p-1 text-content-muted hover:text-content-primary transition-colors rounded"
+                aria-label="Close edit dialog"
+              >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleSaveRename} className="space-y-3 text-xs">
+            <form onSubmit={handleSaveRename} className="space-y-3.5 text-xs">
               <div>
-                <label className="block text-slate-400 font-semibold mb-1">Title *</label>
+                <label className="block text-content-secondary font-semibold mb-1.5">Title *</label>
                 <input
                   type="text"
                   required
                   value={editTitle}
                   onChange={(e) => setEditTitle(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none"
+                  className="w-full h-11 bg-canvas-surface border border-canvas-border rounded-xl px-3.5 text-content-primary text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30 shadow-inner"
                 />
               </div>
 
               <div>
-                <label className="block text-slate-400 font-semibold mb-1">Category *</label>
+                <label className="block text-content-secondary font-semibold mb-1.5">Category *</label>
                 <select
                   value={editCategory}
                   onChange={(e) => setEditCategory(e.target.value as VaultCategory)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-white text-sm focus:outline-none"
+                  className="w-full h-11 bg-canvas-surface border border-canvas-border rounded-xl px-3.5 text-content-primary text-sm outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30 cursor-pointer shadow-inner"
                 >
                   {CATEGORIES.map((cat) => (
-                    <option key={cat} value={cat}>
+                    <option key={cat} value={cat} className="bg-canvas-surface text-content-primary">
                       {cat}
                     </option>
                   ))}
@@ -703,47 +781,47 @@ export default function DocumentVaultPage() {
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-slate-400 font-semibold mb-1">Issue Date</label>
+                  <label className="block text-content-secondary font-semibold mb-1.5">Issue Date</label>
                   <input
                     type="date"
                     value={editIssueDate}
                     onChange={(e) => setEditIssueDate(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
+                    className="w-full h-10 bg-canvas-surface border border-canvas-border rounded-xl px-3 text-content-primary text-xs font-mono outline-none focus:border-brand-500 shadow-inner"
                   />
                 </div>
                 <div>
-                  <label className="block text-slate-400 font-semibold mb-1">Expiry Date</label>
+                  <label className="block text-content-secondary font-semibold mb-1.5">Expiry Date</label>
                   <input
                     type="date"
                     value={editExpiryDate}
                     onChange={(e) => setEditExpiryDate(e.target.value)}
-                    className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
+                    className="w-full h-10 bg-canvas-surface border border-canvas-border rounded-xl px-3 text-content-primary text-xs font-mono outline-none focus:border-brand-500 shadow-inner"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-slate-400 font-semibold mb-1">Notes</label>
+                <label className="block text-content-secondary font-semibold mb-1.5">Reference Notes</label>
                 <textarea
                   rows={2}
                   value={editNotes}
                   onChange={(e) => setEditNotes(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-1.5 text-white text-xs"
+                  className="w-full bg-canvas-surface border border-canvas-border rounded-xl p-3 text-content-primary text-xs outline-none focus:border-brand-500 shadow-inner resize-none"
                 />
               </div>
 
-              <div className="flex gap-2 justify-end pt-3 border-t border-slate-800">
+              <div className="flex gap-2.5 justify-end pt-3 border-t border-canvas-border">
                 <button
                   type="button"
                   onClick={() => setEditingDoc(null)}
-                  className="bg-slate-800 hover:bg-slate-700 text-slate-300 px-4 py-2 rounded-xl font-semibold"
+                  className="btn-secondary px-4 py-2.5 text-xs font-semibold"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={actionLoading}
-                  className="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2 rounded-xl font-semibold transition"
+                  className="btn-primary px-5 py-2.5 text-xs font-bold shadow-brand-glow"
                 >
                   Save Changes
                 </button>
@@ -753,47 +831,97 @@ export default function DocumentVaultPage() {
         </div>
       )}
 
-      {/* PREVIEW MODAL */}
-      {previewDoc && (
-        <div className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-md">
-          <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-3xl h-[85vh] flex flex-col shadow-2xl overflow-hidden">
-            <div className="p-4 border-b border-slate-800 flex items-center justify-between">
+      {/* MODAL: DELETE CONFIRMATION DIALOG */}
+      {deletingDoc && (
+        <div
+          role="alertdialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4 backdrop-blur-sm animate-in fade-in duration-150"
+        >
+          <div className="bg-canvas-subtle border border-status-danger/40 rounded-2xl p-6 max-w-sm w-full shadow-elevated space-y-4 animate-in zoom-in-95 duration-150">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-status-danger-bg border border-status-danger/30 flex items-center justify-center text-status-danger shrink-0">
+                <ShieldAlert className="w-5 h-5" />
+              </div>
               <div>
-                <h3 className="font-bold text-white text-sm">{previewDoc.title}</h3>
-                <span className="text-[11px] text-emerald-400">Secure 60-Second Session</span>
+                <h2 className="text-sm font-bold text-content-primary">Delete Document?</h2>
+                <p className="text-2xs text-content-secondary mt-0.5">
+                  &quot;{deletingDoc.title}&quot; will be permanently expunged from the storage vault.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-end gap-2 pt-3 border-t border-canvas-border">
+              <button
+                type="button"
+                onClick={() => setDeletingDoc(null)}
+                className="btn-secondary px-4 py-2 text-xs font-semibold"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={confirmDeleteDocument}
+                className="px-4 py-2 rounded-xl bg-status-danger hover:bg-status-danger/90 text-white text-xs font-bold transition-colors shadow-sm"
+              >
+                Confirm Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL: SECURE PREVIEW VIEWER */}
+      {previewDoc && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 bg-black/80 flex items-center justify-center p-4 backdrop-blur-md animate-in fade-in duration-150"
+        >
+          <div className="bg-canvas-subtle border border-canvas-border rounded-2xl w-full max-w-3xl h-[85vh] flex flex-col shadow-elevated overflow-hidden animate-in zoom-in-95 duration-150">
+            <div className="p-4 border-b border-canvas-border flex items-center justify-between">
+              <div>
+                <h2 className="font-bold text-content-primary text-sm truncate max-w-xs sm:max-w-md">{previewDoc.title}</h2>
+                <span className="text-2xs font-mono text-status-success flex items-center gap-1.5 mt-0.5 font-semibold">
+                  <ShieldCheck className="w-3.5 h-3.5 text-status-success" />
+                  Authenticated 60-Second Session Stream
+                </span>
               </div>
               <div className="flex items-center gap-2">
                 <a
                   href={previewDoc.url}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="p-1.5 rounded-lg bg-slate-800 text-slate-300 hover:text-white transition"
+                  className="p-2 rounded-xl bg-canvas-surface border border-canvas-border text-content-secondary hover:text-content-primary transition-colors shadow-inner"
                   title="Open externally"
+                  aria-label="Open document in a new window"
                 >
                   <ExternalLink className="w-4 h-4" />
                 </a>
                 <button
+                  type="button"
                   onClick={() => setPreviewDoc(null)}
-                  className="p-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white"
+                  className="p-2 rounded-xl bg-canvas-surface border border-canvas-border text-content-muted hover:text-content-primary transition-colors shadow-inner"
+                  aria-label="Close document preview"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
             </div>
 
-            <div className="flex-1 bg-slate-950 p-2 overflow-auto flex items-center justify-center">
+            <div className="flex-1 bg-canvas-base p-2 overflow-auto flex items-center justify-center">
               {previewDoc.mimeType.includes('pdf') ? (
                 <iframe
                   src={previewDoc.url}
                   title={previewDoc.title}
-                  className="w-full h-full rounded-lg border border-slate-800"
+                  className="w-full h-full rounded-xl border border-canvas-border shadow-inner"
                 />
               ) : (
                 /* eslint-disable-next-line @next/next/no-img-element */
                 <img
                   src={previewDoc.url}
                   alt={previewDoc.title}
-                  className="max-h-full max-w-full object-contain rounded-lg shadow"
+                  className="max-h-full max-w-full object-contain rounded-xl shadow-md"
                 />
               )}
             </div>

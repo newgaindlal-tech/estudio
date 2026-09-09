@@ -1,929 +1,798 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import katex from 'katex';
 import {
-  evaluateExpression,
+  Fraction,
+  floatToFraction,
+  evaluateExpressionSafe,
   AngleMode,
-  decimalToFraction,
-  formatToMixedFraction,
-  integrate,
-  differentiate,
-  summation,
-  solveEquation,
-  evaluateWithVariables,
-  gcd,
-  lcm,
-  primeFactors,
-  decimalToDMS,
-  dmsToDecimal,
-  SCIENTIFIC_CONSTANTS,
-} from '@/lib/calculator/engine';
+} from '@/lib/calculator/full-engine';
 import {
-  Calculator as CalcIcon,
-  RotateCcw,
   Delete,
   Equal,
-  Sigma,
-  Table as TableIcon,
-  Layers,
-  Binary,
-  Compass,
-  Zap,
-  Variable,
-  Activity,
-  ArrowRightLeft,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
   ChevronDown,
+  X,
+  SlidersHorizontal,
+  ArrowUpRight,
+  Database,
+  Layers,
+  Compass,
+  Sigma,
+  Activity,
+  Binary,
+  Zap,
+  Table as TableIcon,
+  Calculator as CalcIcon,
 } from 'lucide-react';
 
-type CalcSystemMode =
-  | 'COMP'        // Standard Math-Print
-  | 'CMPLX'       // Complex Numbers
-  | 'CALC'        // Calculus: Integration, Derivatives, Summation, SOLVE
-  | 'EQN'         // Quadratic, Cubic, Simultaneous 2 & 3 Unknowns
-  | 'MATRIX'      // Matrix 2x2 & 3x3 Operations
-  | 'VECTOR'      // Vector 2D & 3D (Dot, Cross, Mag)
-  | 'STAT'        // 1-Var Stats & 2-Var Regression
-  | 'TABLE'       // Function Tables f(x)
-  | 'BASE_N'      // Dec, Bin, Oct, Hex & Logic
-  | 'CONSTANTS';  // Physical Constants & Unit Conversions
+type ActiveOverlay = 'NONE' | 'MODE' | 'VARS';
 
-export default function CompleteScientificCalculator() {
-  const [systemMode, setSystemMode] = useState<CalcSystemMode>('COMP');
-  const [display, setDisplay] = useState('0');
-  const [resultPreview, setResultPreview] = useState('');
+export default function ScientificCalculatorPage() {
+  const router = useRouter();
+
+  // Overlay state exclusivity
+  const [activeOverlay, setActiveOverlay] = useState<ActiveOverlay>('NONE');
+
+  // Expression Buffer & Display State
+  const [displayExpr, setDisplayExpr] = useState('0');
+  const [resultText, setResultText] = useState('0');
+  const [exactFraction, setExactFraction] = useState<string | null>(null);
+  const [showMixed, setShowMixed] = useState(false);
+  const [cursorPos, setCursorPos] = useState(1);
   const [angleMode, setAngleMode] = useState<AngleMode>('DEG');
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+
+  // Shift & Modifier States
   const [isShift, setIsShift] = useState(false);
   const [isAlpha, setIsAlpha] = useState(false);
-  const [ansValue, setAnsValue] = useState<number>(0);
+  const [isHyp, setIsHyp] = useState(false);
   const [engExponent, setEngExponent] = useState(0);
 
-  // S<=>D State
-  const [fractionDisplay, setFractionDisplay] = useState<string | null>(null);
-  const [showMixed, setShowMixed] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  // Memory Registers: A, B, C, D, E, F, X, Y, M
+  // Memory Registers & Calculation History
+  const [ansValue, setAnsValue] = useState<number>(0);
   const [registers, setRegisters] = useState<Record<string, number>>({
     A: 0, B: 0, C: 0, D: 0, E: 0, F: 0, X: 0, Y: 0, M: 0,
   });
+  const [history, setHistory] = useState<{ expr: string; res: string }[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
 
-  // Calculus Mode States
-  const [calcFunc, setCalcFunc] = useState('X^2 - 4');
-  const [calcLower, setCalcLower] = useState('0');
-  const [calcUpper, setCalcUpper] = useState('3');
-  const [calcPoint, setCalcPoint] = useState('2');
-  const [calcOutput, setCalcOutput] = useState<string | null>(null);
-
-  // Equation Mode States
-  const [eqnType, setEqnType] = useState<'QUAD' | 'CUBIC' | 'SIM2' | 'SIM3'>('QUAD');
-  const [eqCoeffs, setEqCoeffs] = useState<Record<string, string>>({
-    a: '1', b: '-5', c: '6', d: '0',
-    a1: '2', b1: '3', c1: '8',
-    a2: '5', b2: '-1', c2: '3',
-  });
-  const [eqnSolutions, setEqnSolutions] = useState<string[] | null>(null);
-
-  // Complex Mode States
-  const [cmplxR1, setCmplxR1] = useState('3');
-  const [cmplxI1, setCmplxI1] = useState('4');
-  const [cmplxOutput, setCmplxOutput] = useState<string | null>(null);
-
-  // Matrix Mode States (3x3 Matrix A)
-  const [matA, setMatA] = useState<number[][]>([
-    [1, 2, 3],
-    [0, 1, 4],
-    [5, 6, 0],
-  ]);
-  const [matDet, setMatDet] = useState<number | null>(null);
-
-  // Vector Mode States (3D Vectors u and v)
-  const [vecU, setVecU] = useState<[number, number, number]>([1, 2, 3]);
-  const [vecV, setVecV] = useState<[number, number, number]>([4, 5, 6]);
-  const [vecOutput, setVecOutput] = useState<string | null>(null);
-
-  // Stats Mode States
-  const [statData, setStatData] = useState('4, 6, 8, 10, 12');
-  const [statOutput, setStatOutput] = useState<any>(null);
-
-  // Table Mode States
-  const [tblFunc, setTblFunc] = useState('X^2 + 1');
-  const [tblStart, setTblStart] = useState('0');
-  const [tblEnd, setTblEnd] = useState('5');
-  const [tblStep, setTblStep] = useState('1');
-  const [tblRows, setTblRows] = useState<{ x: number; fx: number }[]>([]);
-
-  // Base-N State
-  const [baseVal, setBaseVal] = useState('42');
-
+  // Keypad Token Insertion with Cursor Support
   const appendToken = useCallback((token: string) => {
-    setError(null);
-    setFractionDisplay(null);
-    setDisplay((prev) => {
-      if (prev === '0' && !['+', '*', '/', '%', '^', '!'].includes(token)) return token;
-      return prev + token;
+    setErrorMessage(null);
+    setExactFraction(null);
+    setDisplayExpr((prev) => {
+      if (prev === '0' && !['+', '*', '/', '%', '^', '!'].includes(token)) {
+        setCursorPos(token.length);
+        return token;
+      }
+      const before = prev.slice(0, cursorPos);
+      const after = prev.slice(cursorPos);
+      const next = before + token + after;
+      setCursorPos(before.length + token.length);
+      return next;
     });
+
+    if (isShift) setIsShift(false);
+    if (isAlpha) setIsAlpha(false);
+    if (isHyp) setIsHyp(false);
+  }, [cursorPos, isShift, isAlpha, isHyp]);
+
+  // Smart Context-Aware Deletion
+  const handleDelete = useCallback(() => {
+    setErrorMessage(null);
+    setExactFraction(null);
+    setDisplayExpr((prev) => {
+      if (prev.length <= 1 || prev === '0' || cursorPos === 0) {
+        setCursorPos(0);
+        return '0';
+      }
+
+      const before = prev.slice(0, cursorPos);
+      const after = prev.slice(cursorPos);
+
+      const atomicTokens = [
+        'asin(', 'acos(', 'atan(', 'asinh(', 'acosh(', 'atanh(',
+        'sinh(', 'cosh(', 'tanh(', 'sin(', 'cos(', 'tan(',
+        'cbrt(', 'sqrt(', 'log(', 'ln(', 'Ans', '×10^'
+      ];
+
+      for (const token of atomicTokens) {
+        if (before.endsWith(token)) {
+          const cut = before.slice(0, -token.length);
+          const next = cut + after;
+          setCursorPos(cut.length);
+          return next.length === 0 ? '0' : next;
+        }
+      }
+
+      const cut = before.slice(0, -1);
+      const next = cut + after;
+      setCursorPos(cut.length);
+      return next.length === 0 ? '0' : next;
+    });
+  }, [cursorPos]);
+
+  const handleClear = useCallback(() => {
+    setDisplayExpr('0');
+    setResultText('0');
+    setExactFraction(null);
+    setErrorMessage(null);
+    setCursorPos(1);
   }, []);
 
-  const handleClear = () => {
-    setDisplay('0');
-    setResultPreview('');
-    setFractionDisplay(null);
-    setError(null);
-  };
-
-  const handleDelete = () => {
-    setError(null);
-    setFractionDisplay(null);
-    setDisplay((prev) => (prev.length <= 1 ? '0' : prev.slice(0, -1)));
-  };
-
+  // Primary Deterministic Calculation Engine
   const handleCompute = useCallback(() => {
-    if (!display || display === '0') return;
+    if (!displayExpr || displayExpr === '0') return;
     try {
-      const res = evaluateWithVariables(display, { ...registers, Ans: ansValue }, angleMode);
-      setAnsValue(res);
-      setDisplay(res.toString());
-      setResultPreview('');
-      setError(null);
+      setErrorMessage(null);
 
-      const frac = decimalToFraction(res);
-      if (frac.denominator !== 1) {
-        setFractionDisplay(`${frac.numerator}/${frac.denominator}`);
+      const res = evaluateExpressionSafe(displayExpr, { ...registers, Ans: ansValue }, angleMode);
+      setResultText(String(res));
+      setAnsValue(res);
+      setHistory((prev) => [{ expr: displayExpr, res: String(res) }, ...prev.slice(0, 49)]);
+
+      try {
+        const frac = floatToFraction(res);
+        if (frac.d !== 1n && frac.d <= 100000n) {
+          setExactFraction(frac.toString());
+        } else {
+          setExactFraction(null);
+        }
+      } catch {
+        setExactFraction(null);
       }
     } catch (err: any) {
-      setError(err.message || 'Syntax ERROR');
+      setErrorMessage(err.message || 'Syntax ERROR');
     }
-  }, [display, registers, ansValue, angleMode]);
+  }, [displayExpr, registers, ansValue, angleMode]);
 
+  // Physical Keyboard Listener
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement).tagName)) return;
+
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        if (activeOverlay !== 'NONE') {
+          setActiveOverlay('NONE');
+        } else {
+          handleClear();
+        }
+        return;
+      }
+
+      if (activeOverlay !== 'NONE') return;
+
+      if (e.key >= '0' && e.key <= '9') appendToken(e.key);
+      else if (['+', '-', '*', '/'].includes(e.key)) appendToken(e.key);
+      else if (e.key === '.') appendToken('.');
+      else if (e.key === '(' || e.key === ')') appendToken(e.key);
+      else if (e.key === '^') appendToken('^');
+      else if (e.key === 'Enter' || e.key === '=') {
+        e.preventDefault();
+        handleCompute();
+      } else if (e.key === 'Backspace') {
+        e.preventDefault();
+        handleDelete();
+      } else if (e.key === 'ArrowLeft') {
+        e.preventDefault();
+        setCursorPos((p) => Math.max(0, p - 1));
+      } else if (e.key === 'ArrowRight') {
+        e.preventDefault();
+        setCursorPos((p) => Math.min(displayExpr.length, p + 1));
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [appendToken, handleCompute, handleDelete, handleClear, displayExpr.length, activeOverlay]);
+
+  // S<=>D Fraction Toggle
   const toggleFractionDecimal = () => {
-    const val = parseFloat(display);
+    const val = parseFloat(resultText);
     if (isNaN(val)) return;
 
-    if (!fractionDisplay) {
-      const frac = decimalToFraction(val);
-      setFractionDisplay(`${frac.numerator}/${frac.denominator}`);
-      setShowMixed(false);
-    } else if (!showMixed) {
-      const frac = decimalToFraction(val);
-      setFractionDisplay(formatToMixedFraction(frac));
-      setShowMixed(true);
-    } else {
-      setFractionDisplay(null);
-      setShowMixed(false);
-    }
-  };
-
-  const handleENG = () => {
-    const val = parseFloat(display);
-    if (isNaN(val) || val === 0) return;
-    const nextExp = engExponent + 3;
-    setEngExponent(nextExp);
-    const adjusted = val / Math.pow(10, nextExp);
-    setDisplay(`${adjusted}×10^${nextExp}`);
-  };
-
-  const handleRunIntegral = () => {
     try {
-      const a = evaluateExpression(calcLower, angleMode);
-      const b = evaluateExpression(calcUpper, angleMode);
-      const res = integrate(
-        (x) => evaluateWithVariables(calcFunc, { ...registers, X: x }, angleMode),
-        a,
-        b
-      );
-      setCalcOutput(`∫ = ${Math.round(res * 1e7) / 1e7}`);
-    } catch (e: any) {
-      setCalcOutput(`ERROR: ${e.message}`);
-    }
-  };
-
-  const handleRunDerivative = () => {
-    try {
-      const pt = evaluateExpression(calcPoint, angleMode);
-      const res = differentiate(
-        (x) => evaluateWithVariables(calcFunc, { ...registers, X: x }, angleMode),
-        pt
-      );
-      setCalcOutput(`d/dx|x=${pt} = ${res}`);
-    } catch (e: any) {
-      setCalcOutput(`ERROR: ${e.message}`);
-    }
-  };
-
-  const handleRunSummation = () => {
-    try {
-      const a = parseInt(calcLower, 10);
-      const b = parseInt(calcUpper, 10);
-      const res = summation(
-        (x) => evaluateWithVariables(calcFunc, { ...registers, X: x }, angleMode),
-        a,
-        b
-      );
-      setCalcOutput(`∑ = ${res}`);
-    } catch (e: any) {
-      setCalcOutput(`ERROR: ${e.message}`);
-    }
-  };
-
-  const handleRunSolve = () => {
-    try {
-      const res = solveEquation((x) =>
-        evaluateWithVariables(calcFunc, { ...registers, X: x }, angleMode)
-      );
-      setCalcOutput(`SOLVE: X = ${res}`);
-    } catch (e: any) {
-      setCalcOutput(`ERROR: ${e.message}`);
-    }
-  };
-
-  const handleSolveEqn = () => {
-    if (eqnType === 'QUAD') {
-      const a = parseFloat(eqCoeffs.a);
-      const b = parseFloat(eqCoeffs.b);
-      const c = parseFloat(eqCoeffs.c);
-      if (a === 0) return setEqnSolutions(['a cannot be 0']);
-
-      const d = b * b - 4 * a * c;
-      if (d >= 0) {
-        const x1 = (-b + Math.sqrt(d)) / (2 * a);
-        const x2 = (-b - Math.sqrt(d)) / (2 * a);
-        setEqnSolutions([`x₁ = ${x1.toFixed(5)}`, `x₂ = ${x2.toFixed(5)}`]);
+      if (!exactFraction) {
+        const frac = floatToFraction(val);
+        setExactFraction(frac.toString());
+        setShowMixed(false);
+      } else if (!showMixed) {
+        const frac = floatToFraction(val);
+        setExactFraction(frac.toMixed());
+        setShowMixed(true);
       } else {
-        const real = (-b / (2 * a)).toFixed(4);
-        const imag = (Math.sqrt(-d) / (2 * a)).toFixed(4);
-        setEqnSolutions([`x₁ = ${real} + ${imag}i`, `x₂ = ${real} - ${imag}i`]);
+        setExactFraction(null);
+        setShowMixed(false);
       }
-    } else if (eqnType === 'SIM2') {
-      const a1 = parseFloat(eqCoeffs.a1), b1 = parseFloat(eqCoeffs.b1), c1 = parseFloat(eqCoeffs.c1);
-      const a2 = parseFloat(eqCoeffs.a2), b2 = parseFloat(eqCoeffs.b2), c2 = parseFloat(eqCoeffs.c2);
-      const det = a1 * b2 - a2 * b1;
-      if (det === 0) return setEqnSolutions(['No unique solution (det = 0)']);
-      const x = (c1 * b2 - c2 * b1) / det;
-      const y = (a1 * c2 - a2 * c1) / det;
-      setEqnSolutions([`x = ${x.toFixed(4)}`, `y = ${y.toFixed(4)}`]);
-    }
-  };
-
-  const handleRunComplex = (op: 'MOD' | 'ARG' | 'CONJG' | 'POLAR') => {
-    const r = parseFloat(cmplxR1);
-    const im = parseFloat(cmplxI1);
-    if (isNaN(r) || isNaN(im)) return;
-
-    if (op === 'MOD') {
-      setCmplxOutput(`|z| = ${Math.sqrt(r * r + im * im).toFixed(5)}`);
-    } else if (op === 'ARG') {
-      const deg = (Math.atan2(im, r) * 180) / Math.PI;
-      setCmplxOutput(`arg(z) = ${deg.toFixed(4)}°`);
-    } else if (op === 'CONJG') {
-      setCmplxOutput(`z̄ = ${r} ${im >= 0 ? '-' : '+'} ${Math.abs(im)}i`);
-    } else if (op === 'POLAR') {
-      const mod = Math.sqrt(r * r + im * im).toFixed(4);
-      const deg = ((Math.atan2(im, r) * 180) / Math.PI).toFixed(2);
-      setCmplxOutput(`${mod} ∠ ${deg}°`);
-    }
-  };
-
-  const handleMatrixDet = () => {
-    const [[a, b, c], [d, e, f], [g, h, i]] = matA;
-    const det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
-    setMatDet(det);
-  };
-
-  const handleRunVector = (op: 'DOT' | 'CROSS' | 'MAG') => {
-    const [u1, u2, u3] = vecU;
-    const [v1, v2, v3] = vecV;
-
-    if (op === 'DOT') {
-      const dot = u1 * v1 + u2 * v2 + u3 * v3;
-      setVecOutput(`u · v = ${dot}`);
-    } else if (op === 'CROSS') {
-      const c1 = u2 * v3 - u3 * v2;
-      const c2 = u3 * v1 - u1 * v3;
-      const c3 = u1 * v2 - u2 * v1;
-      setVecOutput(`u × v = (${c1}, ${c2}, ${c3})`);
-    } else if (op === 'MAG') {
-      const mU = Math.sqrt(u1 * u1 + u2 * u2 + u3 * u3).toFixed(4);
-      const mV = Math.sqrt(v1 * v1 + v2 * v2 + v3 * v3).toFixed(4);
-      setVecOutput(`|u| = ${mU}, |v| = ${mV}`);
-    }
-  };
-
-  const handleRunStats = () => {
-    const vals = statData
-      .split(',')
-      .map((s) => parseFloat(s.trim()))
-      .filter((n) => !isNaN(n));
-    if (vals.length === 0) return;
-
-    const n = vals.length;
-    const sum = vals.reduce((a, b) => a + b, 0);
-    const mean = sum / n;
-    const sumSq = vals.reduce((a, b) => a + b * b, 0);
-    const popVar = vals.reduce((acc, v) => acc + Math.pow(v - mean, 2), 0) / n;
-    const sampVar = n > 1 ? vals.reduce((acc, v) => acc + Math.pow(v - mean, 2), 0) / (n - 1) : 0;
-
-    setStatOutput({
-      n,
-      sum: sum.toFixed(3),
-      mean: mean.toFixed(4),
-      popSD: Math.sqrt(popVar).toFixed(4),
-      sampSD: Math.sqrt(sampVar).toFixed(4),
-      min: Math.min(...vals),
-      max: Math.max(...vals),
-    });
-  };
-
-  const handleGenerateTable = () => {
-    try {
-      const st = parseFloat(tblStart);
-      const en = parseFloat(tblEnd);
-      const sp = parseFloat(tblStep);
-      if (sp <= 0 || st > en) return;
-
-      const rows: { x: number; fx: number }[] = [];
-      for (let x = st; x <= en; x += sp) {
-        const val = evaluateWithVariables(tblFunc, { ...registers, X: x }, angleMode);
-        rows.push({ x: Math.round(x * 1e4) / 1e4, fx: Math.round(val * 1e4) / 1e4 });
-      }
-      setTblRows(rows);
     } catch {
-      // Keep state clean on malformed expressions
+      setExactFraction(null);
     }
   };
+
+  const storeToRegister = (reg: string) => {
+    const val = parseFloat(resultText);
+    if (!isNaN(val)) {
+      setRegisters((prev) => ({ ...prev, [reg]: val }));
+      setActiveOverlay('NONE');
+    }
+  };
+
+  const renderFormulaKaTeX = (raw: string) => {
+    if (!raw || raw === '0') return '<span class="text-slate-600 font-mono">0</span>';
+    const formatted = raw
+      .replace(/\*/g, ' \\times ')
+      .replace(/\//g, ' \\div ')
+      .replace(/sqrt\(([^)]+)\)/g, '\\sqrt{$1}')
+      .replace(/cbrt\(([^)]+)\)/g, '\\sqrt[3]{$1}')
+      .replace(/\^2/g, '^{2}')
+      .replace(/\^3/g, '^{3}')
+      .replace(/\^/g, '^');
+
+    try {
+      return katex.renderToString(formatted, { throwOnError: false, displayMode: false });
+    } catch {
+      return raw;
+    }
+  };
+
+  // Structured System Modes Directory
+  const engineeringModes = [
+    {
+      id: 'COMP',
+      badge: '01',
+      title: 'Standard V.P.A.M.',
+      desc: 'Natural display textbook arithmetic & trigonometry',
+      href: '/calculator',
+      icon: CalcIcon,
+    },
+    {
+      id: 'MATRIX',
+      badge: '02',
+      title: 'Matrix Algebra',
+      desc: 'Up to 3×3 Inversion, Determinants & Transpositions',
+      href: '/calculator/matrix',
+      icon: Layers,
+    },
+    {
+      id: 'VECTOR',
+      badge: '03',
+      title: '3D Vector Mechanics',
+      desc: 'Dot product, Cross product & Modulus analysis',
+      href: '/calculator/vector',
+      icon: Compass,
+    },
+    {
+      id: 'EQN',
+      badge: '04',
+      title: 'Equation Solver',
+      desc: 'Quadratic curves & 2-Variable linear systems',
+      href: '/calculator/equations',
+      icon: Equal,
+    },
+    {
+      id: 'CALC',
+      badge: '05',
+      title: 'Numerical Calculus',
+      desc: 'Adaptive Gauss definite integrals & point derivatives',
+      href: '/calculator/calculus',
+      icon: Sigma,
+    },
+    {
+      id: 'CMPLX',
+      badge: '06',
+      title: 'Complex Numbers',
+      desc: 'Rectangular a+bi, Polar r∠θ & Phasor transformations',
+      href: '/calculator/complex',
+      icon: Activity,
+    },
+    {
+      id: 'STAT',
+      badge: '07',
+      title: 'Statistics & Dispersion',
+      desc: 'Mean x̄, Population σ, Sample s & Data range',
+      href: '/calculator/statistics',
+      icon: TableIcon,
+    },
+    {
+      id: 'TABLE',
+      badge: '08',
+      title: 'Function Table',
+      desc: 'Interval stepped evaluations for function f(X)',
+      href: '/calculator/table',
+      icon: TableIcon,
+    },
+    {
+      id: 'BASE_N',
+      badge: '09',
+      title: 'Base-N Digital Logic',
+      desc: 'Real-time Hex, Binary, Octal & Decimal converters',
+      href: '/calculator/base-n',
+      icon: Binary,
+    },
+    {
+      id: 'CONSTANTS',
+      badge: '10',
+      title: 'Constants & Physics',
+      desc: 'CODATA standardized physical & engineering constants',
+      href: '/calculator/constants',
+      icon: Zap,
+    },
+  ];
 
   return (
-    <div className="max-w-xl mx-auto space-y-4 pb-28 md:pb-10 px-1 sm:px-0">
-      {/* Header & Systems Navigation Bar */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-slate-800/80 pb-3">
+    <div className="max-w-md mx-auto space-y-3 pb-24 md:pb-10 px-2 sm:px-0 select-none">
+      
+      {/* Workstation Top Navigation Bar */}
+      <div className="flex items-center justify-between px-1">
         <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2">
-            <CalcIcon className="w-6 h-6 text-blue-500 flex-shrink-0" />
+          <h2 className="text-sm font-semibold tracking-tight text-content-primary flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-status-success animate-pulse" />
             Scientific Workstation
           </h2>
-          <p className="text-slate-400 text-xs mt-0.5">
-            Institutional natural textbook engine with Zero-eval safety.
-          </p>
+          <p className="text-2xs text-content-muted">Deterministic Offline VPAM Core</p>
         </div>
-
-        {/* Mode Selector */}
-        <div className="flex items-center gap-2 self-start sm:self-auto">
-          <span className="text-xs font-semibold text-slate-400">MODE:</span>
-          <select
-            value={systemMode}
-            onChange={(e) => setSystemMode(e.target.value as CalcSystemMode)}
-            className="bg-slate-900 border border-slate-700 text-blue-400 font-bold px-2.5 py-1.5 rounded-xl text-xs focus:ring-1 focus:ring-blue-500"
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => setActiveOverlay((prev) => (prev === 'VARS' ? 'NONE' : 'VARS'))}
+            className={`btn-secondary px-2.5 py-1.5 text-xs font-semibold ${
+              activeOverlay === 'VARS'
+                ? '!bg-status-success !text-white !border-transparent shadow-sm'
+                : ''
+            }`}
+            aria-expanded={activeOverlay === 'VARS'}
+            aria-label="Toggle variable memory registers"
           >
-            <option value="COMP">1: COMP (Standard)</option>
-            <option value="CMPLX">2: CMPLX (Complex i)</option>
-            <option value="CALC">3: CALCULUS (∫, d/dx, ∑)</option>
-            <option value="EQN">4: EQN (Quad, Sim)</option>
-            <option value="MATRIX">5: MATRIX (3x3)</option>
-            <option value="VECTOR">6: VECTOR (3D)</option>
-            <option value="STAT">7: STAT (Mean, SD)</option>
-            <option value="TABLE">8: TABLE (f(X))</option>
-            <option value="BASE_N">9: BASE-N (Bin, Dec, Hex)</option>
-            <option value="CONSTANTS">10: CONSTANTS (Physics)</option>
-          </select>
+            <Database className="w-3.5 h-3.5" />
+            VARS
+          </button>
+          <button
+            onClick={() => setActiveOverlay((prev) => (prev === 'MODE' ? 'NONE' : 'MODE'))}
+            className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-all active:scale-95 outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${
+              activeOverlay === 'MODE'
+                ? 'bg-brand-500 text-white border-brand-400 shadow-sm shadow-brand-glow font-bold'
+                : 'bg-canvas-subtle text-brand-400 border-canvas-border hover:bg-canvas-surface hover:text-brand-300'
+            }`}
+            aria-expanded={activeOverlay === 'MODE'}
+            aria-label="Open mode switcher"
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5" />
+            MODE
+          </button>
         </div>
       </div>
 
-      {/* ========================================================================= */}
-      {/* MODE 1: COMP (NATURAL DISPLAY & SCIENTIFIC ARITHMETIC)                    */}
-      {/* ========================================================================= */}
-      {systemMode === 'COMP' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3 sm:p-5 shadow-2xl space-y-3.5">
-          {/* LCD Screen */}
-          <div className="bg-slate-950 border border-slate-800/90 rounded-xl p-3 sm:p-4 flex flex-col justify-end min-h-[110px] sm:min-h-[130px] text-right font-mono relative">
-            <div className="flex items-center justify-between text-[11px] text-slate-500 mb-1">
-              <div className="flex items-center gap-1.5">
-                <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${isShift ? 'bg-amber-600 text-white' : 'bg-slate-800 text-slate-400'}`}>S</span>
-                <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${isAlpha ? 'bg-rose-600 text-white' : 'bg-slate-800 text-slate-400'}`}>A</span>
-                <span className="bg-blue-950 text-blue-400 border border-blue-900 px-1.5 py-0.2 rounded text-[10px] font-bold">{angleMode}</span>
-                {registers.M !== 0 && <span className="bg-slate-800 text-emerald-400 px-1 rounded text-[10px] font-bold">M</span>}
+      {/* Hardware Casing Chassis */}
+      <div className="bg-canvas-subtle border border-canvas-border rounded-3xl shadow-elevated p-4 sm:p-5 flex flex-col gap-3 relative overflow-hidden">
+        
+        {/* Soft Modal Dismissal Backdrop */}
+        {activeOverlay !== 'NONE' && (
+          <div
+            onClick={() => setActiveOverlay('NONE')}
+            className="absolute inset-0 bg-[#030712]/95 backdrop-blur-md z-20 transition-all animate-in fade-in duration-150"
+            aria-hidden="true"
+          />
+        )}
+
+        {/* ========================================================================= */}
+        {/* 1. SYSTEM MODE SELECTION OVERLAY                                         */}
+        {/* ========================================================================= */}
+        {activeOverlay === 'MODE' && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Select System Engine Mode"
+            className="absolute inset-x-3.5 top-3.5 z-30 bg-canvas-subtle border-2 border-brand-500/60 rounded-2xl p-4 shadow-elevated space-y-3 animate-in zoom-in-95 duration-150"
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-canvas-border pb-2.5 px-0.5">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-md bg-brand-500/15 border border-brand-500/30 flex items-center justify-center text-brand-400">
+                  <SlidersHorizontal className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-content-primary tracking-wide">SYSTEM ENGINE MODES</h4>
+                  <p className="text-2xs text-content-secondary">Select dedicated calculation pipeline</p>
+                </div>
               </div>
-              {error ? (
-                <span className="text-rose-400 font-semibold text-[11px]">{error}</span>
-              ) : (
-                <span className="text-emerald-400 font-medium text-[11px]">{resultPreview}</span>
-              )}
+              <button
+                onClick={() => setActiveOverlay('NONE')}
+                className="w-7 h-7 rounded-lg bg-canvas-surface hover:bg-canvas-elevated border border-canvas-border flex items-center justify-center text-content-muted hover:text-content-primary transition-colors"
+                aria-label="Close mode menu"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
             </div>
 
-            <div className="text-2xl sm:text-3xl font-bold text-white tracking-wider break-all overflow-x-auto no-scrollbar">
-              {fractionDisplay ? (
-                <div className="flex items-center justify-end gap-2 text-blue-400 font-sans">
-                  <span className="text-[11px] text-slate-400">Ans:</span>
-                  <span className="font-bold underline decoration-blue-500 underline-offset-4">{fractionDisplay}</span>
-                </div>
-              ) : (
-                display
-              )}
+            {/* Scrollable Navigation List */}
+            <div className="grid grid-cols-1 gap-1.5 max-h-[350px] overflow-y-auto pr-1 select-none scrollbar-thin scrollbar-thumb-canvas-border">
+              {engineeringModes.map((m) => {
+                const Icon = m.icon;
+                const isCurrent = m.id === 'COMP';
+                return (
+                  <button
+                    key={m.id}
+                    onClick={() => {
+                      setActiveOverlay('NONE');
+                      if (!isCurrent) router.push(m.href);
+                    }}
+                    className={`w-full text-left p-3.5 rounded-2xl border transition-all duration-150 outline-none active:scale-[0.98] ${
+                      isCurrent
+                        ? 'bg-canvas-elevated text-content-primary border-2 border-brand-500 shadow-[0_0_20px_-4px_rgba(59,130,246,0.35)] font-bold'
+                        : 'bg-canvas-surface text-content-secondary border-canvas-border hover:bg-canvas-elevated hover:text-content-primary'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div
+                          className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs border shrink-0 transition-colors ${
+                            isCurrent
+                              ? 'bg-brand-500 text-white border-brand-400 shadow-sm'
+                              : 'bg-canvas-subtle text-content-secondary border-canvas-border'
+                          }`}
+                        >
+                          <Icon className="w-3.5 h-3.5" />
+                        </div>
+                        <span className="text-xs font-mono font-bold text-brand-400">[{m.badge}] {m.title}</span>
+                      </div>
+                      <span className={`text-2xs px-2.5 py-1 rounded-xl font-bold ${isCurrent ? 'bg-brand-500 text-white shadow-sm' : 'bg-canvas-subtle text-content-muted'}`}>
+                        {isCurrent ? 'ACTIVE' : 'SELECT'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-content-secondary mt-1 truncate">{m.desc}</p>
+                  </button>
+                );
+              })}
             </div>
           </div>
+        )}
 
-          {/* Quick Controls Bar */}
-          <div className="flex flex-wrap items-center justify-between gap-1.5 text-xs">
-            <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800">
-              {(['DEG', 'RAD', 'GRA'] as AngleMode[]).map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setAngleMode(m)}
-                  className={`px-2 py-1 rounded font-semibold text-[11px] transition ${angleMode === m ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'}`}
+        {/* ========================================================================= */}
+        {/* 2. VARIABLE REGISTERS OVERLAY (STO / RCL)                                 */}
+        {/* ========================================================================= */}
+        {activeOverlay === 'VARS' && (
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Variable Memory Registers"
+            className="absolute inset-x-3.5 top-3.5 z-30 bg-canvas-subtle border-2 border-status-success/60 rounded-2xl p-4 shadow-elevated space-y-3 animate-in zoom-in-95 duration-150"
+          >
+            {/* Modal Header */}
+            <div className="flex items-center justify-between border-b border-canvas-border pb-2.5 px-0.5">
+              <div className="flex items-center gap-2">
+                <div className="w-6 h-6 rounded-md bg-status-success-bg border border-status-success/30 flex items-center justify-center text-status-success">
+                  <Database className="w-3.5 h-3.5" />
+                </div>
+                <div>
+                  <h4 className="text-xs font-bold text-content-primary tracking-wide">VARIABLE REGISTERS</h4>
+                  <p className="text-2xs text-content-secondary">Store (STO) or Recall (RCL) values</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setActiveOverlay('NONE')}
+                className="w-7 h-7 rounded-lg bg-canvas-surface hover:bg-canvas-elevated border border-canvas-border flex items-center justify-center text-content-muted hover:text-content-primary transition-colors"
+                aria-label="Close variable registers"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Registers Matrix Grid */}
+            <div className="grid grid-cols-3 gap-2">
+              {Object.entries(registers).map(([k, v]) => (
+                <div
+                  key={k}
+                  className="bg-canvas-surface border border-canvas-border p-2.5 rounded-xl flex flex-col justify-between shadow-inner"
                 >
-                  {m}
-                </button>
+                  <div className="flex items-center justify-between pb-1 border-b border-canvas-border">
+                    <span className="w-5 h-5 rounded bg-canvas-subtle text-content-primary font-mono font-bold text-xs flex items-center justify-center border border-canvas-border">
+                      {k}
+                    </span>
+                    <span className="text-2xs font-mono font-semibold text-status-success truncate max-w-[50px]">
+                      {v}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-1.5 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => storeToRegister(k)}
+                      className="py-1.5 rounded-lg bg-status-success-bg hover:bg-status-success/25 border border-status-success/40 text-emerald-300 font-bold text-2xs transition-colors active:scale-95 shadow-sm"
+                      title={`Store current answer into ${k}`}
+                    >
+                      STO
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        appendToken(k);
+                        setActiveOverlay('NONE');
+                      }}
+                      className="py-1.5 rounded-lg bg-canvas-subtle hover:bg-canvas-elevated border border-canvas-border text-content-primary font-bold text-2xs transition-colors active:scale-95 shadow-sm"
+                      title={`Recall variable ${k}`}
+                    >
+                      RCL
+                    </button>
+                  </div>
+                </div>
               ))}
             </div>
-
-            <div className="flex items-center gap-1">
-              <button
-                onClick={toggleFractionDecimal}
-                title="Convert Fraction (S<=>D)"
-                className="px-2.5 py-1 rounded-lg border border-emerald-800 bg-emerald-950/60 text-emerald-300 font-bold text-[11px] hover:bg-emerald-900/60 transition"
-              >
-                S⇔D
-              </button>
-              <button
-                onClick={handleENG}
-                title="Engineering Notation"
-                className="px-2 py-1 rounded-lg border border-slate-700 bg-slate-800 text-slate-300 font-bold text-[11px] hover:bg-slate-700 transition"
-              >
-                ENG
-              </button>
-              <button
-                onClick={() => setIsShift(!isShift)}
-                className={`px-2 py-1 rounded-lg border font-bold text-[11px] transition ${isShift ? 'bg-amber-600 text-white border-amber-500' : 'bg-slate-800 text-amber-400 border-slate-700'}`}
-              >
-                SHIFT
-              </button>
-              <button
-                onClick={() => setIsAlpha(!isAlpha)}
-                className={`px-2 py-1 rounded-lg border font-bold text-[11px] transition ${isAlpha ? 'bg-rose-600 text-white border-rose-500' : 'bg-slate-800 text-rose-400 border-slate-700'}`}
-              >
-                ALPHA
-              </button>
-            </div>
           </div>
+        )}
 
-          {/* Keypad Grid (Mobile Touch Safe: 5 Columns) */}
-          <div className="grid grid-cols-5 gap-1 sm:gap-2 select-none text-[11px] sm:text-xs md:text-sm font-semibold">
-            {/* Trigonometry */}
-            <button onClick={() => appendToken(isShift ? 'asin(' : 'sin(')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/60">
-              {isShift ? 'sin⁻¹' : 'sin'}
-            </button>
-            <button onClick={() => appendToken(isShift ? 'acos(' : 'cos(')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/60">
-              {isShift ? 'cos⁻¹' : 'cos'}
-            </button>
-            <button onClick={() => appendToken(isShift ? 'atan(' : 'tan(')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/60">
-              {isShift ? 'tan⁻¹' : 'tan'}
-            </button>
-            <button onClick={() => appendToken('π')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/60 font-serif">π</button>
-            <button onClick={() => appendToken('e')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/60 font-serif">e</button>
-
-            {/* Functions */}
-            <button onClick={() => appendToken('ln(')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/60">ln</button>
-            <button onClick={() => appendToken('log(')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/60">log</button>
-            <button onClick={() => appendToken(isShift ? 'cbrt(' : 'sqrt(')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/60">
-              {isShift ? '∛' : '√'}
-            </button>
-            <button onClick={() => appendToken('^')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/60">xʸ</button>
-            <button onClick={() => appendToken('!')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700/60">n!</button>
-
-            {/* Controls */}
-            <button onClick={handleClear} className="py-2.5 sm:py-3 rounded-lg bg-rose-950/70 hover:bg-rose-900/70 text-rose-300 border border-rose-800/60 font-bold">AC</button>
-            <button onClick={handleDelete} className="py-2.5 sm:py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 flex items-center justify-center">
-              <Delete className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-            </button>
-            <button onClick={() => appendToken('(')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700">(</button>
-            <button onClick={() => appendToken(')')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700">)</button>
-            <button onClick={() => appendToken('/')} className="py-2.5 sm:py-3 rounded-lg bg-blue-950/70 hover:bg-blue-900/70 text-blue-300 border border-blue-800/60 text-sm sm:text-base">÷</button>
-
-            {/* Row 7-9 */}
-            <button onClick={() => appendToken('7')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800/50 hover:bg-slate-800 text-white border border-slate-700/60 text-sm sm:text-base">7</button>
-            <button onClick={() => appendToken('8')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800/50 hover:bg-slate-800 text-white border border-slate-700/60 text-sm sm:text-base">8</button>
-            <button onClick={() => appendToken('9')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800/50 hover:bg-slate-800 text-white border border-slate-700/60 text-sm sm:text-base">9</button>
-            <button onClick={() => appendToken(isShift ? 'P' : '%')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700">
-              {isShift ? 'nPr' : '%'}
-            </button>
-            <button onClick={() => appendToken('*')} className="py-2.5 sm:py-3 rounded-lg bg-blue-950/70 hover:bg-blue-900/70 text-blue-300 border border-blue-800/60 text-sm sm:text-base">×</button>
-
-            {/* Row 4-6 */}
-            <button onClick={() => appendToken('4')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800/50 hover:bg-slate-800 text-white border border-slate-700/60 text-sm sm:text-base">4</button>
-            <button onClick={() => appendToken('5')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800/50 hover:bg-slate-800 text-white border border-slate-700/60 text-sm sm:text-base">5</button>
-            <button onClick={() => appendToken('6')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800/50 hover:bg-slate-800 text-white border border-slate-700/60 text-sm sm:text-base">6</button>
-            <button onClick={() => appendToken(isShift ? 'C' : '^2')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700">
-              {isShift ? 'nCr' : 'x²'}
-            </button>
-            <button onClick={() => appendToken('-')} className="py-2.5 sm:py-3 rounded-lg bg-blue-950/70 hover:bg-blue-900/70 text-blue-300 border border-blue-800/60 text-sm sm:text-base">−</button>
-
-            {/* Row 1-3 */}
-            <button onClick={() => appendToken('1')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800/50 hover:bg-slate-800 text-white border border-slate-700/60 text-sm sm:text-base">1</button>
-            <button onClick={() => appendToken('2')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800/50 hover:bg-slate-800 text-white border border-slate-700/60 text-sm sm:text-base">2</button>
-            <button onClick={() => appendToken('3')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800/50 hover:bg-slate-800 text-white border border-slate-700/60 text-sm sm:text-base">3</button>
-            <button onClick={() => appendToken('.')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 font-bold">.</button>
-            <button onClick={() => appendToken('+')} className="py-2.5 sm:py-3 rounded-lg bg-blue-950/70 hover:bg-blue-900/70 text-blue-300 border border-blue-800/60 text-sm sm:text-base">+</button>
-
-            {/* Bottom Row */}
-            <button onClick={() => appendToken('0')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800/50 hover:bg-slate-800 text-white border border-slate-700/60 text-sm sm:text-base col-span-2">0</button>
-            <button onClick={() => appendToken('Ans')} className="py-2.5 sm:py-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-blue-400 font-bold border border-slate-700">Ans</button>
-            <button onClick={handleCompute} className="py-2.5 sm:py-3 rounded-lg bg-blue-600 hover:bg-blue-500 text-white font-bold flex items-center justify-center col-span-2 shadow-lg shadow-blue-600/30">
-              <Equal className="w-5 h-5" />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODE 2: CMPLX                                                             */}
-      {/* ========================================================================= */}
-      {systemMode === 'CMPLX' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 space-y-4">
-          <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
-            <Activity className="w-5 h-5 text-blue-500" />
-            Complex Numbers Engine (z = a + bi)
-          </h3>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">Real Part (a)</label>
-              <input type="text" value={cmplxR1} onChange={(e) => setCmplxR1(e.target.value)} className="w-full bg-slate-800 border border-slate-700 p-2.5 rounded-xl text-white font-mono text-sm" />
+        {/* ========================================================================= */}
+        {/* DUAL-LINE NATURAL LCD SCREEN (Tactile Texture)                            */}
+        {/* ========================================================================= */}
+        <div
+          aria-live="polite"
+          className="bg-[#8E9F88] text-slate-950 rounded-lcd p-3 border-2 border-[#768571] shadow-inner font-mono flex flex-col justify-between min-h-[110px] relative overflow-hidden"
+        >
+          {/* Status Header Strip */}
+          <div className="flex items-center justify-between text-2xs font-bold border-b border-slate-950/10 pb-0.5">
+            <div className="flex items-center gap-1.5 tracking-tighter">
+              <span className={isShift ? 'bg-slate-950 text-[#8E9F88] px-1 rounded-xs' : 'opacity-25'}>S</span>
+              <span className={isAlpha ? 'bg-slate-950 text-[#8E9F88] px-1 rounded-xs' : 'opacity-25'}>A</span>
+              <span className={isHyp ? 'bg-slate-950 text-[#8E9F88] px-1 rounded-xs' : 'opacity-25'}>HYP</span>
+              <span className="underline">{angleMode}</span>
+              {registers.M !== 0 && <span className="bg-slate-950 text-[#8E9F88] px-1 rounded-xs">M</span>}
             </div>
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">Imaginary Part (b in bi)</label>
-              <input type="text" value={cmplxI1} onChange={(e) => setCmplxI1(e.target.value)} className="w-full bg-slate-800 border border-slate-700 p-2.5 rounded-xl text-white font-mono text-sm" />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-semibold">
-            <button onClick={() => handleRunComplex('MOD')} className="bg-blue-600 hover:bg-blue-500 py-2.5 rounded-xl text-white">|z| (Modulus)</button>
-            <button onClick={() => handleRunComplex('ARG')} className="bg-blue-600 hover:bg-blue-500 py-2.5 rounded-xl text-white">arg(z) (Phase)</button>
-            <button onClick={() => handleRunComplex('CONJG')} className="bg-blue-600 hover:bg-blue-500 py-2.5 rounded-xl text-white">z̄ (Conjugate)</button>
-            <button onClick={() => handleRunComplex('POLAR')} className="bg-emerald-600 hover:bg-emerald-500 py-2.5 rounded-xl text-white">r∠θ (Polar)</button>
-          </div>
-
-          {cmplxOutput && (
-            <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-center font-mono text-base font-bold text-emerald-400">
-              {cmplxOutput}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODE 3: CALCULUS & SOLVE                                                  */}
-      {/* ========================================================================= */}
-      {systemMode === 'CALC' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 space-y-4">
-          <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
-            <Sigma className="w-5 h-5 text-blue-500" />
-            Numerical Calculus & Root Finder
-          </h3>
-
-          <div className="space-y-3 text-xs">
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">Target Function f(X)</label>
-              <input type="text" value={calcFunc} onChange={(e) => setCalcFunc(e.target.value)} placeholder="e.g. X^2 - 4" className="w-full bg-slate-800 border border-slate-700 p-2.5 rounded-xl text-white font-mono text-sm" />
-            </div>
-
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <label className="block text-slate-400 font-semibold mb-1">Lower (a)</label>
-                <input type="text" value={calcLower} onChange={(e) => setCalcLower(e.target.value)} className="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-white font-mono text-xs" />
-              </div>
-              <div>
-                <label className="block text-slate-400 font-semibold mb-1">Upper (b)</label>
-                <input type="text" value={calcUpper} onChange={(e) => setCalcUpper(e.target.value)} className="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-white font-mono text-xs" />
-              </div>
-              <div>
-                <label className="block text-slate-400 font-semibold mb-1">Point (x=c)</label>
-                <input type="text" value={calcPoint} onChange={(e) => setCalcPoint(e.target.value)} className="w-full bg-slate-800 border border-slate-700 p-2 rounded-xl text-white font-mono text-xs" />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 font-semibold">
-              <button onClick={handleRunIntegral} className="bg-blue-600 hover:bg-blue-500 py-2.5 rounded-xl text-white">∫ f(x) dx</button>
-              <button onClick={handleRunDerivative} className="bg-emerald-600 hover:bg-emerald-500 py-2.5 rounded-xl text-white">d/dx</button>
-              <button onClick={handleRunSummation} className="bg-amber-600 hover:bg-amber-500 py-2.5 rounded-xl text-white">∑ f(x)</button>
-              <button onClick={handleRunSolve} className="bg-purple-600 hover:bg-purple-500 py-2.5 rounded-xl text-white">SOLVE</button>
-            </div>
-
-            {calcOutput && (
-              <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-center font-mono text-sm sm:text-base font-bold text-emerald-400">
-                {calcOutput}
-              </div>
+            {errorMessage ? (
+              <span className="text-status-danger font-extrabold">{errorMessage}</span>
+            ) : (
+              <span className="opacity-40">MATH-PRINT</span>
             )}
           </div>
-        </div>
-      )}
 
-      {/* ========================================================================= */}
-      {/* MODE 4: EQUATION SOLVERS                                                  */}
-      {/* ========================================================================= */}
-      {systemMode === 'EQN' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-slate-800 pb-3">
-            <h3 className="text-base sm:text-lg font-bold text-white">Equation Solver</h3>
-            <select value={eqnType} onChange={(e) => setEqnType(e.target.value as any)} className="bg-slate-800 text-xs font-semibold px-2.5 py-1.5 rounded-xl text-white border border-slate-700">
-              <option value="QUAD">Quadratic: aX² + bX + c = 0</option>
-              <option value="SIM2">Simultaneous: 2 Unknowns</option>
-            </select>
+          {/* Upper Math-Print Buffer (KaTeX Typesetting) */}
+          <div
+            className="text-sm font-semibold tracking-wide py-1 text-slate-900 overflow-x-auto whitespace-nowrap scrollbar-none text-left min-h-[28px]"
+            dangerouslySetInnerHTML={{ __html: renderFormulaKaTeX(displayExpr) }}
+          />
+
+          {/* Lower Numeric Result Output */}
+          <div className="flex items-baseline justify-between pt-0.5 border-t border-slate-950/10">
+            <span className="text-2xs font-bold text-slate-800">
+              {exactFraction ? `[ ${exactFraction} ]` : ''}
+            </span>
+            <span className="text-xl font-bold tracking-tight text-right font-mono truncate pl-2">
+              {resultText}
+            </span>
           </div>
+        </div>
 
-          {eqnType === 'QUAD' ? (
-            <div className="grid grid-cols-3 gap-2 text-xs">
-              <div>
-                <label className="block text-slate-400 mb-1">Coeff a</label>
-                <input type="text" value={eqCoeffs.a} onChange={(e) => setEqCoeffs({ ...eqCoeffs, a: e.target.value })} className="w-full bg-slate-800 p-2 rounded-xl text-white font-mono text-center" />
-              </div>
-              <div>
-                <label className="block text-slate-400 mb-1">Coeff b</label>
-                <input type="text" value={eqCoeffs.b} onChange={(e) => setEqCoeffs({ ...eqCoeffs, b: e.target.value })} className="w-full bg-slate-800 p-2 rounded-xl text-white font-mono text-center" />
-              </div>
-              <div>
-                <label className="block text-slate-400 mb-1">Coeff c</label>
-                <input type="text" value={eqCoeffs.c} onChange={(e) => setEqCoeffs({ ...eqCoeffs, c: e.target.value })} className="w-full bg-slate-800 p-2 rounded-xl text-white font-mono text-center" />
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-2.5 text-xs">
-              <div className="flex gap-1.5 items-center font-mono">
-                <input type="text" value={eqCoeffs.a1} onChange={(e) => setEqCoeffs({ ...eqCoeffs, a1: e.target.value })} className="w-14 sm:w-16 bg-slate-800 p-1.5 rounded-lg text-white text-center" /> X +
-                <input type="text" value={eqCoeffs.b1} onChange={(e) => setEqCoeffs({ ...eqCoeffs, b1: e.target.value })} className="w-14 sm:w-16 bg-slate-800 p-1.5 rounded-lg text-white text-center" /> Y =
-                <input type="text" value={eqCoeffs.c1} onChange={(e) => setEqCoeffs({ ...eqCoeffs, c1: e.target.value })} className="w-14 sm:w-16 bg-slate-800 p-1.5 rounded-lg text-white text-center" />
-              </div>
-              <div className="flex gap-1.5 items-center font-mono">
-                <input type="text" value={eqCoeffs.a2} onChange={(e) => setEqCoeffs({ ...eqCoeffs, a2: e.target.value })} className="w-14 sm:w-16 bg-slate-800 p-1.5 rounded-lg text-white text-center" /> X +
-                <input type="text" value={eqCoeffs.b2} onChange={(e) => setEqCoeffs({ ...eqCoeffs, b2: e.target.value })} className="w-14 sm:w-16 bg-slate-800 p-1.5 rounded-lg text-white text-center" /> Y =
-                <input type="text" value={eqCoeffs.c2} onChange={(e) => setEqCoeffs({ ...eqCoeffs, c2: e.target.value })} className="w-14 sm:w-16 bg-slate-800 p-1.5 rounded-lg text-white text-center" />
-              </div>
-            </div>
-          )}
-
-          <button onClick={handleSolveEqn} className="w-full bg-blue-600 hover:bg-blue-500 py-2.5 rounded-xl text-white font-semibold text-xs transition">
-            Calculate Solutions
+        {/* ========================================================================= */}
+        {/* REPLAY NAVIGATION D-PAD & SHIFT CONTROLS                                  */}
+        {/* ========================================================================= */}
+        <div className="grid grid-cols-5 items-center gap-1.5 pt-0.5">
+          <button
+            type="button"
+            onClick={() => setIsShift(!isShift)}
+            className={`py-1.5 rounded-md text-2xs font-bold border transition-colors outline-none focus-visible:ring-1 focus-visible:ring-brand-500 ${
+              isShift
+                ? 'bg-status-warning text-slate-950 border-status-warning'
+                : 'bg-canvas-surface text-status-warning border-canvas-border hover:bg-canvas-elevated'
+            }`}
+          >
+            SHIFT
+          </button>
+          <button
+            type="button"
+            onClick={() => setIsAlpha(!isAlpha)}
+            className={`py-1.5 rounded-md text-2xs font-bold border transition-colors outline-none focus-visible:ring-1 focus-visible:ring-brand-500 ${
+              isAlpha
+                ? 'bg-status-danger text-white border-status-danger'
+                : 'bg-canvas-surface text-status-danger border-canvas-border hover:bg-canvas-elevated'
+            }`}
+          >
+            ALPHA
           </button>
 
-          {eqnSolutions && (
-            <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-center font-mono text-sm space-y-1 text-emerald-400">
-              {eqnSolutions.map((s, idx) => <p key={idx}>{s}</p>)}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODE 5: MATRIX OPERATIONS                                                 */}
-      {/* ========================================================================= */}
-      {systemMode === 'MATRIX' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 space-y-4">
-          <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
-            <Layers className="w-5 h-5 text-blue-500" />
-            3×3 Matrix Engine (Matrix A)
-          </h3>
-
-          <div className="grid grid-cols-3 gap-1.5 sm:gap-2 max-w-xs mx-auto text-center font-mono">
-            {matA.map((row, rIdx) =>
-              row.map((val, cIdx) => (
-                <input
-                  key={`${rIdx}-${cIdx}`}
-                  type="number"
-                  value={val}
-                  onChange={(e) => {
-                    const copy = [...matA.map((r) => [...r])];
-                    copy[rIdx][cIdx] = parseFloat(e.target.value) || 0;
-                    setMatA(copy);
+          {/* Integrated Physical Hardware D-Pad */}
+          <div className="col-span-2 flex items-center justify-center">
+            <div className="w-20 h-10 rounded-full bg-canvas-surface border border-canvas-border flex items-center justify-around px-1 shadow-sm">
+              <button
+                type="button"
+                onClick={() => setCursorPos((p) => Math.max(0, p - 1))}
+                className="p-1 text-content-muted hover:text-content-primary transition-colors"
+                aria-label="Cursor left"
+              >
+                <ChevronLeft className="w-3.5 h-3.5" />
+              </button>
+              <div className="flex flex-col items-center">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (history.length > 0) {
+                      const next = historyIndex === null ? 0 : Math.min(history.length - 1, historyIndex + 1);
+                      setHistoryIndex(next);
+                      setDisplayExpr(history[next].expr);
+                      setCursorPos(history[next].expr.length);
+                    }
                   }}
-                  className="bg-slate-800 border border-slate-700 p-2 sm:p-2.5 rounded-xl text-white text-center text-sm"
-                />
-              ))
-            )}
+                  className="p-0.5 text-content-muted hover:text-content-primary transition-colors"
+                  aria-label="History previous"
+                >
+                  <ChevronUp className="w-3 h-3" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (historyIndex !== null) {
+                      const next = historyIndex - 1;
+                      if (next < 0) {
+                        setHistoryIndex(null);
+                        setDisplayExpr('0');
+                        setCursorPos(1);
+                      } else {
+                        setHistoryIndex(next);
+                        setDisplayExpr(history[next].expr);
+                        setCursorPos(history[next].expr.length);
+                      }
+                    }
+                  }}
+                  className="p-0.5 text-content-muted hover:text-content-primary transition-colors"
+                  aria-label="History next"
+                >
+                  <ChevronDown className="w-3 h-3" />
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCursorPos((p) => Math.min(displayExpr.length, p + 1))}
+                className="p-1 text-content-muted hover:text-content-primary transition-colors"
+                aria-label="Cursor right"
+              >
+                <ChevronRight className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
 
-          <button onClick={handleMatrixDet} className="w-full bg-blue-600 hover:bg-blue-500 py-2.5 rounded-xl text-white font-semibold text-xs transition">
-            Compute det(A)
+          <button
+            type="button"
+            onClick={() => setAngleMode((prev) => (prev === 'DEG' ? 'RAD' : prev === 'RAD' ? 'GRA' : 'DEG'))}
+            className="py-1.5 rounded-md text-2xs font-semibold bg-canvas-surface text-content-secondary border border-canvas-border hover:text-content-primary transition-colors outline-none focus-visible:ring-1 focus-visible:ring-brand-500"
+            aria-label={`Cycle angle units, currently ${angleMode}`}
+          >
+            {angleMode}
+          </button>
+        </div>
+
+        {/* ========================================================================= */}
+        {/* FUNCTION ROW KEYS (Trig, Log & Powers)                                    */}
+        {/* ========================================================================= */}
+        <div className="grid grid-cols-5 gap-1.5 text-xs">
+          <button
+            type="button"
+            onClick={() => appendToken(isShift ? 'asin(' : isHyp ? 'sinh(' : 'sin(')}
+            className="h-9 rounded-md bg-canvas-surface hover:bg-canvas-elevated text-content-secondary hover:text-content-primary border border-canvas-border font-medium text-2xs transition-colors"
+          >
+            {isShift ? 'sin⁻¹' : isHyp ? 'sinh' : 'sin'}
+          </button>
+          <button
+            type="button"
+            onClick={() => appendToken(isShift ? 'acos(' : isHyp ? 'cosh(' : 'cos(')}
+            className="h-9 rounded-md bg-canvas-surface hover:bg-canvas-elevated text-content-secondary hover:text-content-primary border border-canvas-border font-medium text-2xs transition-colors"
+          >
+            {isShift ? 'cos⁻¹' : isHyp ? 'cosh' : 'cos'}
+          </button>
+          <button
+            type="button"
+            onClick={() => appendToken(isShift ? 'atan(' : isHyp ? 'tanh(' : 'tan(')}
+            className="h-9 rounded-md bg-canvas-surface hover:bg-canvas-elevated text-content-secondary hover:text-content-primary border border-canvas-border font-medium text-2xs transition-colors"
+          >
+            {isShift ? 'tan⁻¹' : isHyp ? 'tanh' : 'tan'}
+          </button>
+          <button
+            type="button"
+            onClick={() => appendToken('ln(')}
+            className="h-9 rounded-md bg-canvas-surface hover:bg-canvas-elevated text-content-secondary hover:text-content-primary border border-canvas-border font-medium text-2xs transition-colors"
+          >
+            ln
+          </button>
+          <button
+            type="button"
+            onClick={() => appendToken('log(')}
+            className="h-9 rounded-md bg-canvas-surface hover:bg-canvas-elevated text-content-secondary hover:text-content-primary border border-canvas-border font-medium text-2xs transition-colors"
+          >
+            log
           </button>
 
-          {matDet !== null && (
-            <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-center font-mono text-base font-bold text-emerald-400">
-              det(A) = {matDet}
-            </div>
-          )}
+          <button
+            type="button"
+            onClick={() => appendToken(isShift ? 'cbrt(' : 'sqrt(')}
+            className="h-9 rounded-md bg-canvas-surface hover:bg-canvas-elevated text-content-secondary hover:text-content-primary border border-canvas-border font-medium text-xs transition-colors"
+          >
+            {isShift ? '∛' : '√'}
+          </button>
+          <button
+            type="button"
+            onClick={() => appendToken('^')}
+            className="h-9 rounded-md bg-canvas-surface hover:bg-canvas-elevated text-content-secondary hover:text-content-primary border border-canvas-border font-medium text-xs transition-colors"
+          >
+            xʸ
+          </button>
+          <button
+            type="button"
+            onClick={() => appendToken('(')}
+            className="h-9 rounded-md bg-canvas-surface hover:bg-canvas-elevated text-content-secondary hover:text-content-primary border border-canvas-border font-medium text-xs transition-colors"
+          >
+            (
+          </button>
+          <button
+            type="button"
+            onClick={() => appendToken(')')}
+            className="h-9 rounded-md bg-canvas-surface hover:bg-canvas-elevated text-content-secondary hover:text-content-primary border border-canvas-border font-medium text-xs transition-colors"
+          >
+            )
+          </button>
+          <button
+            type="button"
+            onClick={() => appendToken(isAlpha ? 'X' : 'π')}
+            className="h-9 rounded-md bg-canvas-surface hover:bg-canvas-elevated text-content-secondary hover:text-content-primary border border-canvas-border font-serif text-xs transition-colors"
+          >
+            {isAlpha ? 'X' : 'π'}
+          </button>
         </div>
-      )}
 
-      {/* ========================================================================= */}
-      {/* MODE 6: VECTOR OPERATIONS                                                 */}
-      {/* ========================================================================= */}
-      {systemMode === 'VECTOR' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 space-y-4">
-          <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
-            <Compass className="w-5 h-5 text-blue-500" />
-            3D Vector Engine
-          </h3>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-mono">
-            <div>
-              <label className="block text-slate-400 mb-1">Vector u (x, y, z)</label>
-              <div className="grid grid-cols-3 gap-1.5">
-                {[0, 1, 2].map((idx) => (
-                  <input
-                    key={idx}
-                    type="number"
-                    value={vecU[idx]}
-                    onChange={(e) => {
-                      const copy = [...vecU] as [number, number, number];
-                      copy[idx] = parseFloat(e.target.value) || 0;
-                      setVecU(copy);
-                    }}
-                    className="w-full bg-slate-800 p-2 rounded-xl text-white text-center"
-                  />
-                ))}
-              </div>
-            </div>
-            <div>
-              <label className="block text-slate-400 mb-1">Vector v (x, y, z)</label>
-              <div className="grid grid-cols-3 gap-1.5">
-                {[0, 1, 2].map((idx) => (
-                  <input
-                    key={idx}
-                    type="number"
-                    value={vecV[idx]}
-                    onChange={(e) => {
-                      const copy = [...vecV] as [number, number, number];
-                      copy[idx] = parseFloat(e.target.value) || 0;
-                      setVecV(copy);
-                    }}
-                    className="w-full bg-slate-800 p-2 rounded-xl text-white text-center"
-                  />
-                ))}
-              </div>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs font-semibold">
-            <button onClick={() => handleRunVector('DOT')} className="bg-blue-600 hover:bg-blue-500 py-2.5 rounded-xl text-white">Dot Product (u·v)</button>
-            <button onClick={() => handleRunVector('CROSS')} className="bg-blue-600 hover:bg-blue-500 py-2.5 rounded-xl text-white">Cross Product (u×v)</button>
-            <button onClick={() => handleRunVector('MAG')} className="bg-emerald-600 hover:bg-emerald-500 py-2.5 rounded-xl text-white">Magnitude (|u|, |v|)</button>
-          </div>
-
-          {vecOutput && (
-            <div className="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-center font-mono text-sm sm:text-base font-bold text-emerald-400">
-              {vecOutput}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODE 7: STAT                                                              */}
-      {/* ========================================================================= */}
-      {systemMode === 'STAT' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 space-y-4">
-          <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
-            <TableIcon className="w-5 h-5 text-blue-500" />
-            1-Variable Statistics Engine
-          </h3>
-
-          <div>
-            <label className="block text-slate-400 text-xs font-semibold mb-1">Enter Data Set (comma-separated values)</label>
-            <input type="text" value={statData} onChange={(e) => setStatData(e.target.value)} className="w-full bg-slate-800 border border-slate-700 p-2.5 rounded-xl text-white font-mono text-sm" />
-          </div>
-
-          <button onClick={handleRunStats} className="w-full bg-blue-600 hover:bg-blue-500 py-2.5 rounded-xl text-white font-semibold text-xs transition">
-            Analyze Data
+        {/* ========================================================================= */}
+        {/* PRIMARY KEYPAD MATRIX (High Contrast Numeric Grid)                        */}
+        {/* ========================================================================= */}
+        <div className="grid grid-cols-5 gap-1.5 text-sm font-semibold">
+          {/* Row 1 */}
+          <button type="button" onClick={() => appendToken('7')} className="h-11 rounded-lg bg-[#1C2536] hover:bg-[#253248] active:scale-[0.97] text-content-primary border border-canvas-border shadow-sm transition-all">7</button>
+          <button type="button" onClick={() => appendToken('8')} className="h-11 rounded-lg bg-[#1C2536] hover:bg-[#253248] active:scale-[0.97] text-content-primary border border-canvas-border shadow-sm transition-all">8</button>
+          <button type="button" onClick={() => appendToken('9')} className="h-11 rounded-lg bg-[#1C2536] hover:bg-[#253248] active:scale-[0.97] text-content-primary border border-canvas-border shadow-sm transition-all">9</button>
+          <button type="button" onClick={handleDelete} className="h-11 rounded-lg bg-status-danger-bg hover:bg-status-danger/25 active:scale-[0.97] text-status-danger border border-status-danger/30 flex items-center justify-center transition-all" aria-label="Delete character">
+            <Delete className="w-4 h-4" />
+          </button>
+          <button type="button" onClick={handleClear} className="h-11 rounded-lg bg-status-danger text-white hover:bg-status-danger/90 active:scale-[0.97] font-bold shadow-sm transition-all">
+            AC
           </button>
 
-          {statOutput && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 text-xs font-mono">
-              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800"><span className="text-slate-400">n:</span> <b className="text-white">{statOutput.n}</b></div>
-              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800"><span className="text-slate-400">∑x:</span> <b className="text-white">{statOutput.sum}</b></div>
-              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800"><span className="text-slate-400">Mean x̄:</span> <b className="text-emerald-400">{statOutput.mean}</b></div>
-              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800"><span className="text-slate-400">σx:</span> <b className="text-blue-400">{statOutput.popSD}</b></div>
-              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800"><span className="text-slate-400">sx:</span> <b className="text-blue-400">{statOutput.sampSD}</b></div>
-              <div className="bg-slate-950 p-2.5 rounded-xl border border-slate-800"><span className="text-slate-400">Range:</span> <b className="text-white">{statOutput.min} - {statOutput.max}</b></div>
-            </div>
-          )}
+          {/* Row 2 */}
+          <button type="button" onClick={() => appendToken('4')} className="h-11 rounded-lg bg-[#1C2536] hover:bg-[#253248] active:scale-[0.97] text-content-primary border border-canvas-border shadow-sm transition-all">4</button>
+          <button type="button" onClick={() => appendToken('5')} className="h-11 rounded-lg bg-[#1C2536] hover:bg-[#253248] active:scale-[0.97] text-content-primary border border-canvas-border shadow-sm transition-all">5</button>
+          <button type="button" onClick={() => appendToken('6')} className="h-11 rounded-lg bg-[#1C2536] hover:bg-[#253248] active:scale-[0.97] text-content-primary border border-canvas-border shadow-sm transition-all">6</button>
+          <button type="button" onClick={() => appendToken('*')} className="h-11 rounded-lg bg-canvas-surface hover:bg-canvas-elevated active:scale-[0.97] text-brand-400 border border-canvas-border text-base transition-all">×</button>
+          <button type="button" onClick={() => appendToken('/')} className="h-11 rounded-lg bg-canvas-surface hover:bg-canvas-elevated active:scale-[0.97] text-brand-400 border border-canvas-border text-base transition-all">÷</button>
+
+          {/* Row 3 */}
+          <button type="button" onClick={() => appendToken('1')} className="h-11 rounded-lg bg-[#1C2536] hover:bg-[#253248] active:scale-[0.97] text-content-primary border border-canvas-border shadow-sm transition-all">1</button>
+          <button type="button" onClick={() => appendToken('2')} className="h-11 rounded-lg bg-[#1C2536] hover:bg-[#253248] active:scale-[0.97] text-content-primary border border-canvas-border shadow-sm transition-all">2</button>
+          <button type="button" onClick={() => appendToken('3')} className="h-11 rounded-lg bg-[#1C2536] hover:bg-[#253248] active:scale-[0.97] text-content-primary border border-canvas-border shadow-sm transition-all">3</button>
+          <button type="button" onClick={() => appendToken('+')} className="h-11 rounded-lg bg-canvas-surface hover:bg-canvas-elevated active:scale-[0.97] text-brand-400 border border-canvas-border text-base transition-all">+</button>
+          <button type="button" onClick={() => appendToken('-')} className="h-11 rounded-lg bg-canvas-surface hover:bg-canvas-elevated active:scale-[0.97] text-brand-400 border border-canvas-border text-base transition-all">−</button>
+
+          {/* Row 4 */}
+          <button type="button" onClick={() => appendToken('0')} className="h-11 rounded-lg bg-[#1C2536] hover:bg-[#253248] active:scale-[0.97] text-content-primary border border-canvas-border shadow-sm transition-all">0</button>
+          <button type="button" onClick={() => appendToken('.')} className="h-11 rounded-lg bg-[#1C2536] hover:bg-[#253248] active:scale-[0.97] text-content-primary border border-canvas-border shadow-sm transition-all">.</button>
+          <button type="button" onClick={() => appendToken(String(ansValue))} className="h-11 rounded-lg bg-canvas-surface hover:bg-canvas-elevated active:scale-[0.97] text-brand-400 border border-canvas-border text-xs font-mono transition-all">
+            Ans
+          </button>
+          <button
+            type="button"
+            onClick={toggleFractionDecimal}
+            className="h-11 rounded-lg bg-status-success-bg hover:bg-status-success/20 active:scale-[0.97] text-status-success border border-status-success/30 font-bold text-xs transition-all"
+            title="Toggle between fraction and decimal"
+          >
+            S⇔D
+          </button>
+          <button
+            type="button"
+            onClick={handleCompute}
+            className="btn-primary h-11 text-base font-extrabold shadow-brand-glow"
+            aria-label="Calculate result"
+          >
+            <Equal className="w-5 h-5" />
+          </button>
         </div>
-      )}
 
-      {/* ========================================================================= */}
-      {/* MODE 8: TABLE                                                             */}
-      {/* ========================================================================= */}
-      {systemMode === 'TABLE' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 space-y-4">
-          <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
-            <TableIcon className="w-5 h-5 text-blue-500" />
-            Function Value Table Generator f(X)
-          </h3>
-
-          <div className="space-y-3 text-xs">
-            <div>
-              <label className="block text-slate-400 font-semibold mb-1">Function f(X)</label>
-              <input type="text" value={tblFunc} onChange={(e) => setTblFunc(e.target.value)} className="w-full bg-slate-800 border border-slate-700 p-2.5 rounded-xl text-white font-mono text-sm" />
-            </div>
-            <div className="grid grid-cols-3 gap-2">
-              <div>
-                <label className="block text-slate-400 mb-1">Start</label>
-                <input type="text" value={tblStart} onChange={(e) => setTblStart(e.target.value)} className="w-full bg-slate-800 p-2 rounded-xl text-white font-mono text-xs" />
-              </div>
-              <div>
-                <label className="block text-slate-400 mb-1">End</label>
-                <input type="text" value={tblEnd} onChange={(e) => setTblEnd(e.target.value)} className="w-full bg-slate-800 p-2 rounded-xl text-white font-mono text-xs" />
-              </div>
-              <div>
-                <label className="block text-slate-400 mb-1">Step</label>
-                <input type="text" value={tblStep} onChange={(e) => setTblStep(e.target.value)} className="w-full bg-slate-800 p-2 rounded-xl text-white font-mono text-xs" />
-              </div>
-            </div>
-
-            <button onClick={handleGenerateTable} className="w-full bg-blue-600 hover:bg-blue-500 py-2.5 rounded-xl text-white font-semibold text-xs transition">
-              Generate Table
-            </button>
-
-            {tblRows.length > 0 && (
-              <div className="max-h-56 overflow-y-auto border border-slate-800 rounded-xl">
-                <table className="w-full text-xs font-mono text-left">
-                  <thead className="bg-slate-950 text-slate-400 sticky top-0">
-                    <tr><th className="p-2">X</th><th className="p-2">f(X)</th></tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-800">
-                    {tblRows.map((r, i) => (
-                      <tr key={i} className="hover:bg-slate-800/40">
-                        <td className="p-2 text-white">{r.x}</td>
-                        <td className="p-2 text-emerald-400 font-bold">{r.fx}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODE 9: BASE_N                                                            */}
-      {/* ========================================================================= */}
-      {systemMode === 'BASE_N' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 space-y-4">
-          <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
-            <Binary className="w-5 h-5 text-blue-500" />
-            Base-N Number System Converter
-          </h3>
-
-          <div>
-            <label className="block text-slate-400 text-xs font-semibold mb-1">Decimal Input</label>
-            <input type="number" value={baseVal} onChange={(e) => setBaseVal(e.target.value)} className="w-full bg-slate-800 border border-slate-700 p-2.5 rounded-xl text-white font-mono text-sm" />
-          </div>
-
-          {baseVal && !isNaN(parseInt(baseVal, 10)) && (
-            <div className="space-y-2 font-mono text-xs sm:text-sm">
-              <div className="flex justify-between bg-slate-950 p-2.5 sm:p-3 rounded-xl border border-slate-800">
-                <span className="text-slate-400">DEC (Decimal 10):</span>
-                <span className="text-white font-bold">{parseInt(baseVal, 10).toString(10)}</span>
-              </div>
-              <div className="flex justify-between bg-slate-950 p-2.5 sm:p-3 rounded-xl border border-slate-800">
-                <span className="text-slate-400">BIN (Binary 2):</span>
-                <span className="text-blue-400 font-bold">{parseInt(baseVal, 10).toString(2)}</span>
-              </div>
-              <div className="flex justify-between bg-slate-950 p-2.5 sm:p-3 rounded-xl border border-slate-800">
-                <span className="text-slate-400">HEX (Hexadecimal 16):</span>
-                <span className="text-emerald-400 font-bold">{parseInt(baseVal, 10).toString(16).toUpperCase()}</span>
-              </div>
-              <div className="flex justify-between bg-slate-950 p-2.5 sm:p-3 rounded-xl border border-slate-800">
-                <span className="text-slate-400">OCT (Octal 8):</span>
-                <span className="text-amber-400 font-bold">{parseInt(baseVal, 10).toString(8)}</span>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODE 10: CONSTANTS                                                        */}
-      {/* ========================================================================= */}
-      {systemMode === 'CONSTANTS' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 sm:p-6 space-y-4">
-          <h3 className="text-base sm:text-lg font-bold text-white flex items-center gap-2 border-b border-slate-800 pb-3">
-            <Zap className="w-5 h-5 text-amber-500" />
-            Standard Scientific Constants
-          </h3>
-
-          <div className="max-h-80 overflow-y-auto space-y-2 pr-1 text-xs">
-            {Object.entries(SCIENTIFIC_CONSTANTS).map(([k, c]) => (
-              <div key={k} className="flex items-center justify-between p-2.5 sm:p-3 rounded-xl bg-slate-950 border border-slate-800 font-mono">
-                <div>
-                  <span className="font-bold text-white mr-2">{c.symbol}</span>
-                  <span className="text-slate-400 text-[11px] sm:text-xs">{c.name}</span>
-                </div>
-                <div className="text-right">
-                  <span className="text-emerald-400 font-semibold">{c.value.toExponential(4)}</span>
-                  <span className="text-slate-500 ml-1 text-[10px] sm:text-[11px]">{c.unit}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      </div>
     </div>
   );
 }

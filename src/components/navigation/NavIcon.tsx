@@ -6,29 +6,25 @@ import {
   Clock,
   FolderArchive,
   Settings,
-  LucideProps,
+  type LucideIcon,
+  type LucideProps,
 } from 'lucide-react';
 import { NavItem } from '@/types/navigation';
+
+const ICON_MAP: Record<NavItem['iconName'], LucideIcon> = {
+  LayoutDashboard,
+  Calculator,
+  CalendarCheck,
+  Clock,
+  FolderArchive,
+  Settings,
+};
 
 interface NavIconProps extends LucideProps {
   name: NavItem['iconName'];
 }
 
 export function NavIcon({ name, ...props }: NavIconProps) {
-  switch (name) {
-    case 'LayoutDashboard':
-      return <LayoutDashboard {...props} />;
-    case 'Calculator':
-      return <Calculator {...props} />;
-    case 'CalendarCheck':
-      return <CalendarCheck {...props} />;
-    case 'Clock':
-      return <Clock {...props} />;
-    case 'FolderArchive':
-      return <FolderArchive {...props} />;
-    case 'Settings':
-      return <Settings {...props} />;
-    default:
-      return <LayoutDashboard {...props} />;
-  }
+  const Component = ICON_MAP[name] ?? LayoutDashboard;
+  return <Component aria-hidden="true" {...props} />;
 }
