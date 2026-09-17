@@ -548,10 +548,10 @@ export default function SettingsPage() {
             <div className="space-y-1">
               <span className="text-2xs font-bold text-content-muted uppercase tracking-wider block">Official Email</span>
               <a 
-                href="mailto:support@estudio.workspace?subject=Support%20Request%20-%20Estudio" 
+                href="mailto:supportestudio@gmail.com?subject=Support%20Request%20-%20Estudio" 
                 className="font-mono font-bold text-cyan-400 hover:underline flex items-center gap-1"
               >
-                support@estudio.workspace
+                supportestudio@gmail.com
               </a>
             </div>
             <Mail className="w-5 h-5 text-content-muted" />
