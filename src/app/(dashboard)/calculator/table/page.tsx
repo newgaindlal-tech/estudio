@@ -39,7 +39,15 @@ export default function TableCalculatorPage() {
   const endId = useId();
   const stepId = useId();
 
-  const normalizeExpression = (expr: string) => expr.replace(/\bx\b/g, 'X');
+  const normalizeExpression = (expr: string) => {
+    // 1. Convert all lowercase 'x' to uppercase 'X'
+    let processed = expr.replace(/x/g, 'X');
+    // 2. Insert multiplication for implicit cases like "99X" -> "99*X"
+    processed = processed.replace(/(\d)(\s*)(X)/g, '$1*$3');
+    // 3. Handle number followed by parenthesis e.g. "2(X)" -> "2*(X)"
+    processed = processed.replace(/(\d)(\s*)(\()/g, '$1*$3');
+    return processed;
+  };
 
   const handleGenerate = () => {
     setErrorMsg(null);
@@ -189,7 +197,7 @@ export default function TableCalculatorPage() {
               type="text"
               value={funcF}
               onChange={(e) => setFuncF(e.target.value)}
-              placeholder="e.g. sin(x) + log(X)"
+              placeholder="Enter function or equation"
               className="w-full h-11 px-3.5 rounded-lg bg-canvas-surface border border-canvas-border text-content-primary font-mono text-sm placeholder:text-content-muted outline-none focus:border-sky-500 focus:ring-1 focus:ring-sky-500 transition-colors"
             />
           </div>
@@ -213,7 +221,7 @@ export default function TableCalculatorPage() {
                 type="text"
                 value={funcG}
                 onChange={(e) => setFuncG(e.target.value)}
-                placeholder="e.g. e^x"
+                placeholder="Enter function or equation"
                 className="w-full h-11 px-3.5 rounded-lg bg-canvas-surface border border-canvas-border text-content-primary font-mono text-sm placeholder:text-content-muted outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 transition-colors"
               />
             </div>
@@ -348,7 +356,7 @@ export default function TableCalculatorPage() {
                 Table range ready
               </p>
               <p className="text-2xs text-content-muted max-w-xs mx-auto">
-                Define any function using either lowercase or uppercase x/X (e.g. sin(x), log(X), e^x) and start/end parameters, then click Generate.
+                Define any function using either lowercase or uppercase x/X (e.g. 99X, sin(x), log(X), e^x) and start/end parameters, then click Generate.
               </p>
             </div>
           )
